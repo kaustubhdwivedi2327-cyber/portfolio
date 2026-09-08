@@ -591,7 +591,7 @@ const ABOUT = {
   title: "An engineer who shows the evidence.",
   photo: "assets/portrait.jpg",
   lead:
-    "I am an aerospace structures and design engineer finishing my MSc at Cranfield University. Before Cranfield I spent 18 months as an engineering design intern at Dassault Systèmes in Pune and published a first-author paper on 3D-printed lattice structures. At Cranfield I worked on two industry projects with GKN Aerospace: an LPBF redesign of the Airbus A320 slat-track can and a bird-strike assessment of composite wing leading edges. I like work where the load basis is stated, the evidence chain is documented, and the result says clearly what it clears and what it does not.",
+    "I am an aerospace structures engineer finishing my MSc at Cranfield University. I do not treat CAD, simulation and testing as separate tasks: a design is not finished for me until the model, the manufacturing constraints and the test evidence agree, and I say plainly when they do not. I am the person on a team who wants to understand why something works before trusting it, who keeps the plan and the documentation straight so others can pick up my work, and who takes feedback from more experienced engineers as the fastest way to get better. I have led the technical side of a team, worked to an industrial review cadence and published with co-authors, and what I want next is a UK structures, design or analysis role where I can learn from experienced engineers and be useful from the first week.",
   facts: [
     ["Based", "Cranfield, UK"],
     ["Status", "MSc Advanced Lightweight and Composite Structures, completing Sept 2026"],
