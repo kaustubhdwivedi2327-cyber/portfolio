@@ -17,7 +17,7 @@ const SITE = {
   role: "Aerospace Structures & Design Engineer",
   location: "Cranfield, UK",
   email: "kaustubhdwivedi007@gmail.com",
-  linkedin: "https://linkedin.com/in/kaustubh-dwivedi-65586324a",
+  linkedin: "https://www.linkedin.com/in/kaustubh-dwivedi-65586324a/",
   researchgate: "https://www.researchgate.net/scientific-contributions/Kaustubh-Dwivedi-2272720523",
   orcid: "https://orcid.org/0009-0004-6472-7732",
   cv: "assets/Kaustubh_Dwivedi_CV.pdf",
