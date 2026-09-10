@@ -258,37 +258,6 @@
     </section>`;
   }
 
-  // ---------- services ----------
-  function servicesSection() {
-    const S = SERVICES;
-    return `
-    <section class="section" id="services">
-      <div class="section-head" data-reveal>
-        <span class="kicker">${esc(S.kicker)}</span>
-        <h2>${esc(S.title)}</h2>
-        <p>${esc(S.lead)}</p>
-      </div>
-      <div class="services-grid" data-stagger>
-        ${S.items.map((it, i) => `
-        <div class="service" data-tilt>
-          <span class="mono service-idx">${pad(i + 1)}</span>
-          <h3>${esc(it.name)}</h3>
-          <p>${esc(it.body)}</p>
-          <ul class="service-deliv">${it.deliverables.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
-          <div class="service-foot">
-            <span class="mono">${esc(it.turnaround)}</span>
-            ${it.proof ? `<a class="tag" href="#/project/${esc(it.proof.id)}">${esc(it.proof.label)} →</a>` : ""}
-          </div>
-        </div>`).join("")}
-      </div>
-      ${S.extras && S.extras.length ? `<div class="service-extras" data-reveal><span class="mono">Also</span>${S.extras.map((x) => `<span class="tag">${esc(x)}</span>`).join("")}</div>` : ""}
-      <div class="service-cta" data-reveal>
-        <p>${esc(S.cta)}</p>
-        <a class="btn btn-primary" href="mailto:${esc(SITE.email)}?subject=Freelance%20enquiry" data-magnetic>Ask for a quote</a>
-      </div>
-    </section>`;
-  }
-
   // ---------- presentations ----------
   function presentationsSection() {
     return `
@@ -467,8 +436,6 @@
         <ul class="plain-list" data-stagger>${MEMBERSHIPS.map((m) => `<li>${esc(m)}</li>`).join("")}</ul>
       </div>
     </section>
-
-    ${(typeof SERVICES !== "undefined") ? servicesSection() : ""}
 
     <section class="section contact" id="contact">
       <span class="kicker" data-reveal>05 · Contact</span>

@@ -26,7 +26,7 @@ const SITE = {
     "Aerospace structures and design engineer, completing an MSc in Advanced Lightweight and Composite Structures at Cranfield University. Two industry projects with GKN Aerospace: an LPBF redesign of the Airbus A320 slat-track can, taken from load definition to released native CAD 20.6 % lighter than the existing welded design, and an SPH–FEA bird-strike assessment of composite leading-edge concepts, validated against manufactured specimens and published open access in 2026. Five peer-reviewed publications, including a first-author paper in Materials Today Communications.",
   stance:
     "I work to a stated load basis and a documented evidence chain, and I am explicit about what a result clears and what it does not.",
-  availability: "Available now for UK aerospace structures, design and analysis roles. Remote freelance bookings open from January 2027; enquiries welcome any time.",
+  availability: "Open to UK aerospace structures, design and analysis roles from Sept 2026.",
   stats: [
     { value: 2, suffix: "", decimals: 0, label: "industry projects with GKN Aerospace: A320 slat-track can and composite leading edge" },
     { value: 5, suffix: "", decimals: 0, label: "peer-reviewed publications, one as first author" },
@@ -620,20 +620,6 @@ const TOOLS = [
   { name: "Materialise Magics", level: "Familiar", note: "Support strategy and build-orientation review for the LPBF candidate.", used: [{ id: "slat-track", label: "Slat-track can" }] },
   { name: "MATLAB and Excel", level: "Familiar", note: "Hand-calculation checks, data reduction and verification matrices.", used: ["Coursework", "Project checks"] },
 ];
-
-// Freelance services. Rendered as a section before Contact and linked from the nav; `proof` links to the project that shows the work.
-const SERVICES = {
-  kicker: "04b · Services",
-  title: "Freelance engineering, remote",
-  lead: "Fixed-scope work for small companies, start-ups and research groups that need a part modelled, a structure checked or a design made printable, with a written record they can hand to a supplier or a reviewer. Taking bookings for remote work from January 2027; enquiries are welcome now.",
-  items: [
-    { name: "CAD modelling and drawings", body: "Parametric solids, assemblies and 2D drawings in CATIA V5 or 3DEXPERIENCE, rebuilt cleanly from sketches, photographs, scans or legacy files. You get native files, STEP and PDF drawings, with the design intent captured so the model survives the next change.", deliverables: ["Native CAD and STEP", "PDF drawings", "Digital mock-up"], turnaround: "2 to 5 working days", proof: { id: "gearbox", label: "Gearbox prototype" } },
-    { name: "Finite element analysis with a report", body: "Static strength and stiffness, modal, fatigue screening and explicit impact in Abaqus, verified on an independent mesh before anything is reported. The report states the load basis, the assumptions, the margins and what the result does not cover.", deliverables: ["Model and result files", "Written report", "Margin summary"], turnaround: "1 to 2 weeks", proof: { id: "bird-strike", label: "Bird-strike study" } },
-    { name: "Design for additive manufacturing", body: "Part consolidation, load-path guided redesign, wall-thickness tuning, build orientation and supports, and a thermal build screen, with a mass and cost comparison against the part you have now.", deliverables: ["Redesigned CAD", "Build-ready file", "Comparison report"], turnaround: "2 to 4 weeks", proof: { id: "slat-track", label: "A320 slat-track can" } },
-  ],
-  extras: ["Technical figures and animations for papers, reports and pitch decks", "Python post-processing of simulation output and test data", "Literature-backed material and process screening"],
-  cta: "Send a sketch, a drawing or a one-paragraph brief and you will get a scoped quote within two working days.",
-};
 
 // Awards and recognitions. `image` opens in the lightbox.
 const AWARDS = [
