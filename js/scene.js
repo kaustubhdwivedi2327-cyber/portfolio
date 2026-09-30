@@ -286,7 +286,7 @@
     for (const sz of [1, -1]) {   // logo lights on the tailplane wash the fin
       const sl = new T.SpotLight(0xfff0d6, 3, 22, .7, .8, 1.6); sl.position.set(58.2, 7.4, 5.8 * sz); sl.target.position.set(60.4, 12.6, 0); craft.add(sl, sl.target);
       const pl = new T.PointLight(0xffffff, 0, 14, 1.8); pl.position.set(tip[0] + .6, tip[1] + .3, 29.2 * sz); craft.add(pl); strobeLights.push(pl); }
-    warm(); ready = true; readyAt = performance.now(); if (loadEl) loadEl.classList.add("done"); stage.classList.add("loaded");
+    warm(); ready = true; if (photoOK()) try { depthPass(); } catch (e) {} readyAt = performance.now(); if (loadEl) loadEl.classList.add("done"); stage.classList.add("loaded");
   }).catch(fallback);
 
   /* ---------- camera path ---------- */
@@ -301,7 +301,7 @@
     { p: 0.82, pos: [35.2, 6.0, 25.6], tgt: [37.6, 5.45, 20.0] },
     { p: 1, pos: [-70, 44, 92], tgt: [32, 6, 0] }
   ];
-  const tmpP = new T.Vector3(), tmpT = new T.Vector3(), look = new T.Vector3(), mobT = new T.Vector3();
+  const tmpP = new T.Vector3(), tmpT = new T.Vector3(), look = new T.Vector3(), mobT = new T.Vector3(), mvR = new T.Vector3(), mvU = new T.Vector3();
   function camAt(p) {
     let k = 0; while (k < KF.length - 2 && p > KF[k + 1].p) k++;
     const a = KF[k], b = KF[k + 1], t = smooth(p, a.p, b.p);
@@ -346,20 +346,47 @@
   // in the scroll direction and BEHIND the other way, every other one first) and those further than DROP are released
   const AHEAD = 10, BEHIND = 3, DROP = 12;
   const DECODE_ORDER = [0, 1, 2, 4, 6, 8, 10, 3, 5, 7, 9];
-  let fetching = 0, decoding = 0, lastC = 0, dir = 1, vel = 0, velT = 0, upT = 0;
+  let fetching = 0, decoding = 0, lastC = 0, dir = 1, vel = 0, velT = 0, upT = 0, unfetched = FR.length;
   const get = url => fetch(url).then(r => r.ok ? r.blob() : null, () => null);
   const bitmap = (b, o) => b ? createImageBitmap(b, o).catch(() => null) : null;
   const straight = { premultiplyAlpha: "none" };
   const idle = window.requestIdleCallback ? f => requestIdleCallback(f, { timeout: 1500 }) : f => setTimeout(f, 200);
   const blank = (() => { const t = new T.DataTexture(new Uint8Array([0, 0, 0, 0]), 1, 1); t.needsUpdate = true; return t; })();
   const texOf = bm => { const t = new T.Texture(bm); t.flipY = false; t.generateMipmaps = false; t.minFilter = t.magFilter = T.LinearFilter; t.needsUpdate = true;
-    t.onUpdate = () => { t.image = { width: bm.width, height: bm.height }; }; return t; };   // drop the decoded copy once it is on the GPU
+    t.onUpdate = () => { t.image = { width: bm.width, height: bm.height }; if (bm.close) bm.close(); }; return t; };   // free the decoded copy once it is on the GPU
+  // pictures go up in strips (~1.4 MB, one per screen update) into storage made first, so no update carries a whole
+  // frame (a scrolling frame is 5.6 MB: 4-8 ms in one go on integrated graphics)
+  const gl = renderer.getContext(), STRIP = 1.4e6, strips = renderer.capabilities.isWebGL2;
+  let upJob = null;                     // { key, t, bm, y, done }
+  const extTex = (w, h) => {            // a texture three.js draws but does not fill: storage made here
+    const t = new T.Texture(), g = gl.createTexture(), P = renderer.properties.get(t);
+    t.image = { width: w, height: h }; t.flipY = false; t.generateMipmaps = false; t.minFilter = t.magFilter = T.LinearFilter;
+    renderer.state.bindTexture(gl.TEXTURE_2D, g); gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, w, h);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    P.__webglTexture = g; P.__webglInit = true;
+    t.addEventListener("dispose", () => { gl.deleteTexture(g); renderer.properties.remove(t); });
+    return t;
+  };
+  function stripStep() {                // the next strip of the picture going up
+    const j = upJob, w = j.bm.width, h = j.bm.height, n = Math.min(Math.max(1, Math.floor(STRIP / (w * 4))), h - j.y);
+    renderer.state.bindTexture(gl.TEXTURE_2D, renderer.properties.get(j.t).__webglTexture);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+    gl.pixelStorei(gl.UNPACK_SKIP_ROWS, j.y); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, j.y, w, n, gl.RGBA, gl.UNSIGNED_BYTE, j.bm); gl.pixelStorei(gl.UNPACK_SKIP_ROWS, 0);
+    j.y += n; if (j.y >= h) { upJob = null; j.bm.close(); j.done(); }
+  }
+  const upload = (key, bm, done) => {   // start a picture going up (whole, where strips are not available)
+    if (!strips) { const t = texOf(bm); renderer.initTexture(t); done(); return t; }
+    const t = extTex(bm.width, bm.height); upJob = { key, t, bm, y: 0, done }; stripStep(); return t;
+  };
   const release = k => {
     dropHi(k);
+    if (upJob && texs[k] && upJob.key === texs[k]) upJob = null;
+    for (const b of [bmps[k], bgs[k]]) if (b && b.close) b.close();
     bmps[k] = bgs[k] = null;
-    if (texs[k]) { for (const t of [texs[k].ph, texs[k].g]) if (t !== blank) t.dispose(); texs[k] = null; }
+    if (texs[k]) { for (const t of [texs[k].ph, texs[k].g]) if (t && t !== blank) t.dispose(); texs[k] = null; }
   };
-  const texFor = k => texs[k] || (texs[k] = { ph: texOf(bmps[k]), g: bgs[k] ? texOf(bgs[k]) : blank, up: false });
+  const texFor = k => texs[k];
   // a worker fetches and decodes; the page only sends requests and receives decoded bitmaps
   const WSRC = [
     "const files = new Map();",
@@ -380,24 +407,26 @@
       if (d.cmd === "fetched") { fetching--; st[k] = d.ok ? 2 : 5; }
       else if (d.cmd === "decoded") { decoding--;
         if (!d.b) { st[k] = 5; return; }
-        if (Math.abs(k - lastC) > DROP) st[k] = 2; else { bmps[k] = d.b; bgs[k] = d.g || null; st[k] = 4; } }
-      else if (d.cmd === "full") { const h = hi[k]; if (!h || !d.bm) { if (h) h.st = 3; return; } h.bm = d.bm; h.st = 2; } };
+        if (Math.abs(k - lastC) > DROP) { st[k] = 2; d.b.close(); if (d.g) d.g.close(); } else { bmps[k] = d.b; bgs[k] = d.g || null; st[k] = 4; } }
+      else if (d.cmd === "full") { const h = hi[k]; if (!h || !d.bm) { if (h) h.st = 3; if (d.bm) d.bm.close(); return; } h.bm = d.bm; h.st = 2; } };
   }
-  const dropHi = k => { const h = hi[k]; if (!h) return; if (h.tex) h.tex.dispose(); hi[k] = null; };
+  const dropHi = k => { const h = hi[k]; if (!h) return; if (upJob && upJob.key === h) upJob = null; if (h.tex) h.tex.dispose(); if (h.bm && h.bm.close) h.bm.close(); hi[k] = null; };
   function feed(p, rest) {
     if (!photoOK()) return;
     const c = frameAt(p), now = performance.now(), dtv = Math.min(.1, Math.max(.001, (now - velT) / 1000)); velT = now;
     vel += (Math.abs(c - lastC) / dtv - vel) * Math.min(1, dtv * 6);               // frames per second the reader is passing
     if (c !== lastC) { dir = c > lastC ? 1 : -1; lastC = c; }
     const stride = Math.max(1, Math.min(4, Math.round(vel / 50)));                     // ~one decoded frame per refresh when fast
-    for (let r = 0; r < FR.length && fetching < 6; r++) for (const k of [c + r * dir, c - r * dir]) {
+    for (let r = 0; r < FR.length && fetching < 6 && unfetched > 0; r++) for (let side = 0; side < 2; side++) {
+      const k = c + (side ? -r : r) * dir;
       if (fetching >= 6 || k < 0 || k >= FR.length || st[k]) continue;
-      fetching++; st[k] = 1;
+      fetching++; st[k] = 1; unfetched--;
       if (worker) { worker.postMessage({ cmd: "fetch", k, urls: [abs(RS + "m/" + FR[k].n + ".webp"), abs(RS + "bg/" + FR[k].n + ".webp")] }); continue; }
       Promise.all([get(RS + "m/" + FR[k].n + ".webp"), get(RS + "bg/" + FR[k].n + ".webp")])
         .then(([ph, g]) => { if (ph) { blobs[k] = { ph, g }; st[k] = 2; } else st[k] = 5; }).finally(() => { fetching--; });
     }
-    for (const r0 of DECODE_ORDER) for (const k of r0 <= BEHIND ? [c + r0 * stride * dir, c - r0 * dir] : [c + r0 * stride * dir]) {
+    for (const r0 of DECODE_ORDER) for (let side = 0; side < (r0 <= BEHIND ? 2 : 1); side++) {
+      const k = side ? c - r0 * dir : c + r0 * stride * dir;
       if (decoding >= 4 || k < 0 || k >= FR.length || st[k] !== 2) continue;
       decoding++; st[k] = 3;
       if (worker) { worker.postMessage({ cmd: "decode", k }); continue; }
@@ -420,15 +449,19 @@
     for (let k = 0; k < FR.length; k++) if (hi[k] && Math.abs(k - c) > 3 && !onScreen.includes(k)) dropHi(k);
     // upload ahead: one frame per screen update (a scrolling copy is ~3 ms, a full-size photo ~7 ms), nearest first
     let up = 0;
-    if (rest) for (const k of onScreen) { const h = hi[k]; if (up < 1 && h && h.st === 2 && !h.up && onGPU(k)) { h.tex = texOf(h.bm); renderer.initTexture(h.tex); h.up = true; up++; } }
+    if (upJob) { stripStep(); up++; }                 // a picture part-way up: its next strip
+    if (rest) for (const k of onScreen) { const h = hi[k]; if (up < 1 && h && h.st === 2 && !h.tex && onGPU(k)) { h.tex = upload(h, h.bm, () => { h.up = true; }); up++; } }
     // ahead-of-need uploads are paced (~30 a second) so a fast scroll does not upload on every refresh; the frames the
     // reader is at go up straight away
     let near = false;                   // is any frame near the reader already on the GPU?
     for (let k = Math.max(0, c - 12); k <= Math.min(FR.length - 1, c + 13) && !near; k++) near = onGPU(k) && Math.abs(FR[k].p - p) < .02;
-    for (const r of [0, 1, 2, 3, 4, 5, 6]) for (const k of r ? [c + r * stride * dir, c - r * dir] : [c, c + dir]) {
+    for (let r = 0; r <= 6; r++) for (let side = 0; side < 2; side++) {
+      const k = r ? (side ? c - r * dir : c + r * stride * dir) : (side ? c + dir : c);
       if (near && now - upT < 33) continue;
-      if (up >= 1 || k < 0 || k >= FR.length || !has(k) || (texs[k] && texs[k].up)) continue;
-      const tx = texFor(k); for (const t of [tx.ph, tx.g]) if (t !== blank) renderer.initTexture(t); tx.up = true; up++; upT = now;
+      if (up >= 1 || k < 0 || k >= FR.length || !has(k) || texs[k]) continue;
+      const tx = texs[k] = { ph: null, g: bgs[k] ? texOf(bgs[k]) : blank, up: false };      // the small sky plate goes up whole
+      if (tx.g !== blank) renderer.initTexture(tx.g);
+      tx.ph = upload(tx, bmps[k], () => { tx.up = true; }); up++; upT = now;
     }
   }
   // spinning fans: the fan regions re-rendered at six blade angles, cycled while the reader is still
@@ -448,34 +481,88 @@
     if (!Array.isArray(fanCrops.get(a)) || (b >= 0 && !Array.isArray(fanCrops.get(b)))) return -1;
     return Math.floor(now / 1000 * 24) % 6;
   }
-  // the plate: one full-screen pass. Sky layer = the photo with the aircraft hole filled from the sky plate; aircraft
-  // layer = the photo (with the fan crops) through the matte, shifted by the mouse; both blended between the frames on screen
+  // the plate: one full-screen pass. Each pixel's 3D point comes from the live aircraft's depth (drawn depth-only for
+  // this camera) or, where there is no aircraft, is a direction (sky). Both are projected into the cameras of the two
+  // frames on screen and looked up there: sky from the photo with the aircraft hole filled from the sky plate, aircraft
+  // from the photo (with the fan crops) through its matte. At a frame's own camera this is the photo exactly; between
+  // frames the picture moves like the live model
   const NOBOX = new T.Vector4(-1, -1, -1, -1);
   const plateU = { pA: { value: blank }, mA: { value: blank }, gA: { value: blank }, pB: { value: blank }, mB: { value: blank }, gB: { value: blank },
     fA0: { value: blank }, fA1: { value: blank }, fB0: { value: blank }, fB1: { value: blank },
-    bA0: { value: NOBOX }, bA1: { value: NOBOX }, bB0: { value: NOBOX }, bB1: { value: NOBOX },
-    t: { value: 0 }, hasB: { value: 0 }, res: { value: new T.Vector2(1, 1) }, x0: { value: 0 }, sc: { value: 1 }, sAc: { value: new T.Vector2() }, sBg: { value: new T.Vector2() } };
+    bA0: { value: NOBOX }, bA1: { value: NOBOX }, bB0: { value: NOBOX }, bB1: { value: NOBOX }, dTex: { value: blank },
+    t: { value: 0 }, hasB: { value: 0 }, res: { value: new T.Vector2(1, 1) }, camPos: { value: new T.Vector3() },
+    invVP: { value: new T.Matrix4() }, VPa: { value: new T.Matrix4() }, VPb: { value: new T.Matrix4() }, hasD: { value: 0 }, dist: { value: 50 } };
   const plateMat = new T.ShaderMaterial({ uniforms: plateU, depthTest: false, depthWrite: false,
     vertexShader: "void main(){ gl_Position = vec4(position.xy, 0.0, 1.0); }",
     fragmentShader: [
-      "uniform sampler2D pA, mA, gA, pB, mB, gB, fA0, fA1, fB0, fB1; uniform vec4 bA0, bA1, bB0, bB1;",
-      "uniform float t, hasB, x0, sc; uniform vec2 res, sAc, sBg;",
+      "uniform sampler2D pA, mA, gA, pB, mB, gB, fA0, fA1, fB0, fB1, dTex; uniform vec4 bA0, bA1, bB0, bB1;",
+      "uniform float t, hasB, hasD, dist; uniform vec2 res; uniform vec3 camPos; uniform mat4 invVP, VPa, VPb;",
       "const vec2 RP = vec2(" + RW + ".0, " + RH + ".0);",
-      "vec2 rpx(vec2 s) { vec2 q = vec2(gl_FragCoord.x - s.x, res.y - gl_FragCoord.y - s.y); return vec2((q.x - x0) / sc, q.y / sc); }",
+      "vec2 toRef(mat4 VP, vec4 X) { vec4 c = VP * X; vec2 n = c.xy / c.w; return vec2((n.x * 0.5 + 0.5) * RP.x, (0.5 - n.y * 0.5) * RP.y); }",
+      "vec3 world(vec2 ndc, float d) { vec4 w = invVP * vec4(ndc, d * 2.0 - 1.0, 1.0); return w.xyz / w.w; }",
       "vec4 fan(sampler2D ft, vec4 b, vec2 rp) { if (b.x < 0.0 || rp.x < b.x || rp.y < b.y || rp.x > b.z || rp.y > b.w) return vec4(0.0); return texture2D(ft, (rp - b.xy) / (b.zw - b.xy)); }",
       "vec3 photo(sampler2D P, sampler2D F0, sampler2D F1, vec4 b0, vec4 b1, vec2 rp) {",
       "  vec3 c = texture2D(P, rp / RP).rgb; vec4 f = fan(F0, b0, rp); c = mix(c, f.rgb, f.a); f = fan(F1, b1, rp); return mix(c, f.rgb, f.a); }",
+      "vec3 frame(mat4 VP, sampler2D P, sampler2D M, sampler2D G, sampler2D F0, sampler2D F1, vec4 b0, vec4 b1, vec3 dir, vec3 X, float ac) {",
+      "  vec2 us = toRef(VP, vec4(dir, 0.0)) / RP;",
+      "  vec3 sky = mix(texture2D(P, us).rgb, texture2D(G, us).rgb, texture2D(M, us).a);",
+      "  if (ac < 0.5) return sky;",
+      "  vec2 ra = toRef(VP, vec4(X, 1.0));",
+      "  return mix(sky, photo(P, F0, F1, b0, b1, ra), texture2D(M, ra / RP).a); }",
+      // the nearest aircraft depth on rings of 2 to 22 reference pixels
+      "float nearDepth(vec2 uv, float s) {",
+      "  for (int r = 0; r < 6; r++) {",
+      "    float rad = (r == 0 ? 2.0 : r == 1 ? 4.0 : r == 2 ? 7.0 : r == 3 ? 11.0 : r == 4 ? 16.0 : 22.0) * s, dm = 1.0;",
+      "    for (int i = 0; i < 8; i++) { float a = float(i) * 0.785398 + float(r) * 0.392699; dm = min(dm, texture2D(dTex, uv + vec2(cos(a), sin(a)) * rad / res).r); }",
+      "    if (dm < 1.0) return dm; }",
+      "  return 1.0; }",
       "void main() {",
-      "  vec2 rb = rpx(sBg), ra = rpx(sAc), ub = rb / RP, ua = ra / RP;",
-      "  vec3 bg = mix(texture2D(pA, ub).rgb, texture2D(gA, ub).rgb, texture2D(mA, ub).a);",
-      "  if (hasB > 0.5) bg = mix(bg, mix(texture2D(pB, ub).rgb, texture2D(gB, ub).rgb, texture2D(mB, ub).a), t);",
-      "  vec3 c = mix(bg, photo(pA, fA0, fA1, bA0, bA1, ra), texture2D(mA, ua).a);",
-      "  if (hasB > 0.5) c = mix(c, photo(pB, fB0, fB1, bB0, bB1, ra), texture2D(mB, ua).a * t);",
+      "  vec2 uv = gl_FragCoord.xy / res, ndc = uv * 2.0 - 1.0; vec3 dir = normalize(world(ndc, 1.0) - camPos);",
+      "  float d = texture2D(dTex, uv).r, mS = texture2D(mA, toRef(VPa, vec4(dir, 0.0)) / RP).a;",
+      "  if (d >= 1.0 && (mS > 0.0 || (hasB > 0.5 && texture2D(mB, toRef(VPb, vec4(dir, 0.0)) / RP).a > 0.0))) d = nearDepth(uv, res.y / RP.y);",
+      "  float ac = d < 1.0 ? 1.0 : 0.0; vec3 X = world(ndc, min(d, 0.9999999));",
+      "  if (hasD < 0.5) { ac = 1.0; X = camPos + dir * dist; }             // aircraft not loaded yet: one plane at its distance",
+      "  vec3 c = frame(VPa, pA, mA, gA, fA0, fA1, bA0, bA1, dir, X, ac);",
+      "  if (hasB > 0.5) c = mix(c, frame(VPb, pB, mB, gB, fB0, fB1, bB0, bB1, dir, X, ac), t);",
       "  gl_FragColor = vec4(c, 1.0); }"].join("\n") });
   const plateScene = new T.Scene(), plateQuad = new T.Mesh(new T.PlaneGeometry(2, 2), plateMat); plateQuad.frustumCulled = false; plateScene.add(plateQuad);
   // compiled and drawn once (empty) while the page is still loading, so the first real frame does not stall on it
   if (photoOK()) try { renderer.compile(plateScene, camera); renderer.setClearColor(0x000000, 0); renderer.render(plateScene, camera); renderer.clear(); } catch (e) {}
-  let plateOn = false, lastPair = null, pax = 0, pay = 0, pbx = 0;
+  let plateOn = false, lastPair = null;
+  // the camera each frame was rendered with (same path, same lens shift; the frame's own 2640 x 1200 picture)
+  const refCam = new T.PerspectiveCamera(30, RW / RH, .05, 900), refVPs = new Map(), keepP = new T.Vector3(), keepT = new T.Vector3();
+  const refVP = k => {
+    let m = refVPs.get(k); if (m) return m;
+    const q = FR[k].p; keepP.copy(tmpP); keepT.copy(tmpT);        // camAt writes the shared vectors: keep the reader's
+    camAt(q); refCam.position.copy(tmpP); refCam.lookAt(tmpT);
+    const off = Math.min(smooth(q, .2, .3), 1 - smooth(q, .82, .92));
+    if (off > .001) refCam.setViewOffset(RW, RH, -RH * .224 * off, RH * .06 * off, RW, RH); else refCam.clearViewOffset();
+    refCam.updateMatrixWorld(); m = new T.Matrix4().multiplyMatrices(refCam.projectionMatrix, refCam.matrixWorldInverse);
+    tmpP.copy(keepP); tmpT.copy(keepT); refVPs.set(k, m); return m;
+  };
+  // the live aircraft's depth for this camera: solid parts only, cut by the x-ray plane like the drawn ones
+  let depthRT = null, depthList = null;
+  function depthPass() {
+    plateU.hasD.value = ready ? 1 : 0; if (!ready) return;
+    renderer.getDrawingBufferSize(bufSize);
+    if (!depthRT || depthRT.width !== bufSize.x || depthRT.height !== bufSize.y) {
+      if (depthRT) depthRT.dispose();
+      depthRT = new T.WebGLRenderTarget(bufSize.x, bufSize.y, { depthTexture: new T.DepthTexture(bufSize.x, bufSize.y, T.FloatType) });
+      plateU.dTex.value = depthRT.depthTexture;
+    }
+    if (!depthList) {
+      const twins = new Map(); depthList = [];
+      scene.traverse(o => { if (!(o.layers.mask & 1) || !(o.isMesh || o.isLine || o.isPoints)) return;
+        const m = o.material, solid = o.isMesh && m && m !== sparMat;
+        const ck = m && m.clippingPlanes ? "clip" : "solid";
+        let tw = null; if (solid) { tw = twins.get(ck); if (!tw) { tw = new T.MeshBasicMaterial({ colorWrite: false, side: T.DoubleSide, clippingPlanes: m.clippingPlanes || null }); twins.set(ck, tw); } }
+        depthList.push([o, m, tw, true]); });
+    }
+    for (const e of depthList) if (e[2]) e[0].material = e[2]; else { e[3] = e[0].visible; e[0].visible = false; }
+    camera.layers.set(0); renderer.setRenderTarget(depthRT); renderer.setClearColor(0x000000, 0); renderer.clear(); renderer.render(scene, camera);
+    for (const e of depthList) if (e[2]) e[0].material = e[1]; else e[0].visible = e[3];
+    camera.layers.enableAll(); renderer.setRenderTarget(null);
+  }
   const bufSize = new T.Vector2();
   function setFans(pre, k, ph) {
     const list = ph >= 0 ? fanCrops.get(k) : null;
@@ -489,26 +576,28 @@
     // skipped while scrolling fast)
     const i = frameAt(p);
     let a = -1, b = -1, tt = 0, res = true;
-    for (let k = i; k >= Math.max(0, i - 12); k--) if (onGPU(k)) { a = k; break; }            // only frames already on the GPU,
-    for (let k = i + 1; k <= Math.min(FR.length - 1, i + 13); k++) if (onGPU(k)) { b = k; break; }   // so drawing never uploads
-    if (a >= 0 && Math.abs(FR[a].p - p) > .02) a = -1;
-    if (b >= 0 && Math.abs(FR[b].p - p) > .02) b = -1;
+    for (let k = i; k >= Math.max(0, i - 24); k--) if (onGPU(k)) { a = k; break; }            // only frames already on the GPU,
+    for (let k = i + 1; k <= Math.min(FR.length - 1, i + 25); k++) if (onGPU(k)) { b = k; break; }   // so drawing never uploads
+    if (a >= 0 && Math.abs(FR[a].p - p) > .05) a = -1;       // re-projected, a frame a little way off still sits right
+    if (b >= 0 && Math.abs(FR[b].p - p) > .05) b = -1;
     if (a < 0 && b >= 0) { a = b; b = -1; }
     if (a >= 0 && b >= 0) { tt = clamp((p - FR[a].p) / (FR[b].p - FR[a].p)); if (tt < .01) b = -1; else if (tt > .99) { a = b; b = -1; tt = 0; } }
     if (a < 0) {
       if (lastPair && onGPU(lastPair[0]) && (lastPair[1] < 0 || onGPU(lastPair[1]))) { [a, b, tt] = lastPair; res = "stale"; }
       else return false;
     }
+    if (window.__kdForce && onGPU(a - window.__kdForce)) { a -= window.__kdForce; b = -1; tt = 0; }       // diagnostics: re-project a frame further back
     lastPair = [a, b, tt];
+    if (window.__kdRec) window.__kdRec.push([now, p, b >= 0 ? lerp(FR[a].p, FR[b].p, tt) : FR[a].p, res === true ? 1 : 0, b >= 0 ? b - a : 0]);   // diagnostics: shown vs wanted position
     const ph = res === true ? fanPhase(a, b, rest, now) : -1;
     const A = texFor(a), Bx = b >= 0 ? texFor(b) : A, full = k => hi[k] && hi[k].up ? hi[k].tex : texs[k].ph;
     plateU.pA.value = full(a); plateU.mA.value = A.ph; plateU.gA.value = A.g;          // the matte is the scrolling copy's alpha
     plateU.pB.value = b >= 0 ? full(b) : plateU.pA.value; plateU.mB.value = Bx.ph; plateU.gB.value = Bx.g;
     plateU.t.value = tt; plateU.hasB.value = b >= 0 ? 1 : 0;
     setFans("A", a, ph); setFans("B", b >= 0 ? b : a, b >= 0 ? ph : -1);
-    renderer.getDrawingBufferSize(bufSize); const pr = renderer.getPixelRatio(), sc = bufSize.y / RH;
-    plateU.res.value.copy(bufSize); plateU.sc.value = sc; plateU.x0.value = (bufSize.x - RW * sc) / 2;
-    plateU.sAc.value.set(pax * pr, pay * pr); plateU.sBg.value.set(pbx * pr, 0);
+    renderer.getDrawingBufferSize(bufSize); plateU.res.value.copy(bufSize);
+    camera.updateMatrixWorld(); plateU.invVP.value.multiplyMatrices(camera.matrixWorld, camera.projectionMatrixInverse); plateU.camPos.value.setFromMatrixPosition(camera.matrixWorld);
+    plateU.dist.value = tmpP.distanceTo(tmpT); plateU.VPa.value = refVP(a); plateU.VPb.value = refVP(b >= 0 ? b : a);
     return res;
   }
   // compositing: sky and live aircraft fade in over the photo; overlays (lights, bird, contour, x-ray) always on top, masked by the aircraft's depth
@@ -518,7 +607,9 @@
   // the aircraft's depth, so the light glows hide behind it over the photo frames: depth only, no shading
   const depthOnly = new T.MeshBasicMaterial({ colorWrite: false, side: T.DoubleSide });
   function compose(Lv, over) {
-    renderer.autoClear = false; renderer.setRenderTarget(null); renderer.setClearColor(0x000000, 0); renderer.clear();
+    renderer.autoClear = false;
+    if (plateOn) depthPass();
+    renderer.setRenderTarget(null); renderer.setClearColor(0x000000, 0); renderer.clear();
     if (plateOn) renderer.render(plateScene, quadCam);
     if (Lv > .001 && skyReady) { skyBall.position.copy(camera.position); skyMat.uniforms.opacity.value = Lv; renderer.render(skyScene, camera); }
     if (Lv > .999) { camera.layers.enableAll(); renderer.render(scene, camera); }
@@ -560,7 +651,7 @@
     canMat.transparent = ct; hidden.forEach(o => { o.visible = false; }); camera.layers.enableAll();
   }
 
-  const proj = new T.Vector3();
+  const proj = new T.Vector3(), pv = new T.Vector3(), pv2 = new T.Vector3();
   const setS = (el, k, v) => { if (el["_s" + k] !== v) { el["_s" + k] = v; el.style[k] = v; } };
   let pending = [];
   const place = (el, v, show) => {
@@ -614,11 +705,11 @@
       sparMat.opacity = .32 * xr; sparLine.opacity = xr;
       canMat.transparent = xr > .01; canMat.opacity = 1 - .3 * xr; canMat.depthWrite = xr < .5;
       for (const f of fans) f.rotation.z += dt * 7;
-      const lab = xr > .72 && pS < .49 && !hideOv, tmpV = new T.Vector3();
+      const lab = xr > .72 && pS < .49 && !hideOv, tmpV = pv;
       place(pinSlat, tmpV.copy(slatMid).applyMatrix4(Mx).applyMatrix4(craft.matrixWorld), lab);
-      place(pinTrack, new T.Vector3().copy(trackMid).applyMatrix4(Mx).applyMatrix4(craft.matrixWorld), lab);
-      place(pinSpar, sparMid.clone().applyMatrix4(craft.matrixWorld), lab);
-      place(pinTank, tankPt.clone().applyMatrix4(craft.matrixWorld), lab);
+      place(pinTrack, pv.copy(trackMid).applyMatrix4(Mx).applyMatrix4(craft.matrixWorld), lab);
+      place(pinSpar, pv.copy(sparMid).applyMatrix4(craft.matrixWorld), lab);
+      place(pinTank, pv.copy(tankPt).applyMatrix4(craft.matrixWorld), lab);
       // chapter 2: bird strike on the outboard slat
       const q = clamp((pS - .62) / .2), qi = .42, tt = clamp((q - qi) / (1 - qi)), fade = 1 - smooth(pS, .82, .9), eo = 1 - Math.pow(1 - tt, 3);
       const start = hitV.x - 3.2, fly = q < qi ? q / qi : 1, bx = lerp(start, hitV.x - .12, fly), by = hitV.y + .04;
@@ -629,7 +720,8 @@
       gelMat.opacity = (1 - gone) * fade * smooth(q, 0, .04);
       // SPH spray after contact, coloured by speed (red fast, blue slow) like the solver's velocity plot
       const bo = (q >= qi && q < 1 ? 1 : 0) * smooth(tt, .0, .06) * (1 - smooth(tt, .6, 1) * .75) * fade;
-      if (bo > 0) for (let i = 0; i < NB; i++) {
+      const liveDrawn = liveEase > 0 || !photoOK();
+      if (bo > 0 && liveDrawn) for (let i = 0; i < NB; i++) {
         const b = bird[i]; let x, y, z;
         if (q < qi) { x = bx + b.o.x; y = by + b.o.y; z = hitV.z + b.o.z; }
         else { x = hitV.x - .02 + b.o.x * .25 * (1 - eo) + b.d.x * b.sp * eo * .7; y = by + b.o.y * (1 - eo) + b.d.y * b.sp * eo; z = hitV.z + b.o.z * (1 - eo) + b.d.z * b.sp * eo * 1.3; }
@@ -637,10 +729,10 @@
         const [cr, cg, cb] = jet(clamp(.12 + .88 * (1 - eo) * (.45 + b.sp)));
         bCol[i * 3] = cr; bCol[i * 3 + 1] = cg; bCol[i * 3 + 2] = cb;
       }
-      if (bo > 0) { bGeo.attributes.color.needsUpdate = true; bGeo.attributes.position.needsUpdate = true; }
+      if (bo > 0 && liveDrawn) { bGeo.attributes.color.needsUpdate = true; bGeo.attributes.position.needsUpdate = true; }
       bMat.opacity = bo; birdPts.visible = bo > 0;
       const k = smooth(tt, 0, .06) * fade;
-      if (k > 0 || ovDirty) { ovDirty = k > 0;
+      if ((k > 0 || ovDirty) && liveDrawn) { ovDirty = k > 0;
         const P = sOutPos.array, O = sOutOrig, C = sOutCol.array;
         for (let i = 0; i < sOutPos.count; i++) {
           const dx = O[i * 3] - hitV.x, dy = O[i * 3 + 1] - hitV.y, dz = O[i * 3 + 2] - hitV.z, r = Math.sqrt(dx * dx + dy * dy + dz * dz);
@@ -651,7 +743,7 @@
         }
         sOutPos.needsUpdate = true; sOutCol.needsUpdate = true;
       }
-      place(pinCan, cans[0] ? cans[0].getWorldPosition(new T.Vector3()).add(new T.Vector3(.3, .08, 0)) : hitV, lab);
+      place(pinCan, cans[0] ? cans[0].getWorldPosition(pv).add(pv2.set(.3, .08, 0)) : hitV, lab);
       // lights: steady navigation lights, double-flash strobes, pulsing beacons
       const tl = now / 1000, night = rv;
       for (const L of lights) {
@@ -669,16 +761,18 @@
     camAt(pS);
     const want = photoOK() ? 0 : 1; feed(pS, Math.abs(p - pS) < 3e-4); if (want || liveEase > 0) loadSky();
     smx += (mx - smx) * Math.min(1, dt * 3); smy += (my - smy) * Math.min(1, dt * 3);
-    const d = tmpP.distanceTo(tmpT) * .02 * want * want;
-    // over the rendered frames the mouse slides the aircraft against the sky instead, most in the wide shots
-    const pst = want < .999 ? clamp((tmpP.distanceTo(tmpT) - 8) / 40) : 0;
-    pax = -smx * 36 * pst; pay = -smy * 18 * pst; pbx = smx * 12 * pst;
+    const D = tmpP.distanceTo(tmpT), d = D * .02 * want * want;
     camera.position.set(tmpP.x + smx * d * 3, tmpP.y - smy * d * 2, tmpP.z + smx * d);
     look.copy(tmpT); camera.lookAt(look);
+    // over the rendered frames the mouse slides the camera sideways without turning it, most in the wide shots: the
+    // aircraft moves against the sky (the frames are re-projected through its depth, so this is real parallax)
+    const pst = want < .999 ? clamp((D - 8) / 40) : 0;
+    if (pst > 0) { const k = .536 * D * pst; mvR.set(1, 0, 0).applyQuaternion(camera.quaternion); mvU.set(0, 1, 0).applyQuaternion(camera.quaternion);
+      camera.position.addScaledVector(mvR, smx * .053 * k).addScaledVector(mvU, -smy * .02 * k); }
     const off = Math.min(smooth(pS, .2, .3), 1 - smooth(pS, .82, .92)) * (camera.aspect > 1 ? 1 : 0), cw = sW, ch = sH;
     const mOff = camera.aspect < 1 ? 1 - smooth(pS, .1, .24) : 0;
     // close-ups move the subject right and up by fixed fractions of the height (the rendered frames have the same shift baked in)
-    if (off > .001 || pax || pay) camera.setViewOffset(cw, ch, -ch * .224 * off - pax, ch * .06 * off - pay, cw, ch);
+    if (off > .001) camera.setViewOffset(cw, ch, -ch * .224 * off, ch * .06 * off, cw, ch);
     else if (mOff > .001) camera.setViewOffset(cw, ch, 0, -ch * .2 * mOff, cw, ch); else camera.clearViewOffset();
     const pl = want < .999 ? updatePlate(pS, Math.abs(p - pS) < 3e-4, now) : false, shown = !!pl;
     plateOn = shown; const ps_ = pl === "stale" ? "stale" : shown ? "1" : "0"; if (stage.dataset.photo !== ps_) stage.dataset.photo = ps_;
@@ -686,7 +780,7 @@
     if (shown && photoEase > .98) photoEase = 1;
     if (liveEase < 0) liveEase = want;
     liveEase += (want - liveEase) * Math.min(1, dt * 4); if (Math.abs(want - liveEase) < .02) liveEase = want;
-    hideOv = want < .999 && (!shown || pl === "stale");        // photo not (yet) the right one: no glows or labels over it
+    hideOv = want < .999 && !shown;                            // no photo yet: no glows or labels
     if (shown && loadEl) loadEl.classList.add("done");
     compose(liveEase, !hideOv);
 
