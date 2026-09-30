@@ -148,6 +148,7 @@ button { font: inherit; color: inherit; }
 .stat-l { font-size: 13.5px; line-height: 1.45; color: var(--text-2); }
 .pin { position: absolute; z-index: 1; left: 0; top: 0; pointer-events: none; opacity: 0; will-change: transform; font: 500 11.5px/1 var(--mono); letter-spacing: .06em; white-space: nowrap; transition: opacity .3s; }
 .pin span { display: inline-block; padding: 7px 10px; border-radius: 999px; background: rgba(8, 12, 20, .78); color: #f3f6fb; transform: translate(14px, -50%); }
+.pin.left span { transform: translate(calc(-100% - 14px), -50%); }
 .pin::before { content: ""; position: absolute; left: -5px; top: -5px; width: 10px; height: 10px; border-radius: 50%; background: #ff8a4c; box-shadow: 0 0 0 4px rgba(255, 138, 76, .3); }
 .flight-hud { position: absolute; z-index: 3; left: 50%; bottom: 26px; transform: translateX(-50%); display: flex; align-items: center; gap: 14px; font: 500 11px var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--on-photo-2); }
 .hud-steps { display: flex; gap: 6px; }

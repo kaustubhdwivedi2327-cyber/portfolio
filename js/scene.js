@@ -8,6 +8,7 @@
   if (!flight || !canvas) return;
   const chaps = [...stage.querySelectorAll(".chap")], hud = [...stage.querySelectorAll(".flight-hud b")], hudBtns = [...stage.querySelectorAll(".hud-step")];
   const pinCan = document.getElementById("pin-can"), pinHit = document.getElementById("pin-hit");
+  if (pinCan) pinCan.classList.add("left");      // the can's label reads to the left, over open wing, clear of the rollers and track
   const mkPin = t => { const e = document.createElement("span"); e.className = "pin"; e.setAttribute("aria-hidden", "true"); e.innerHTML = `<span>${t}</span>`; stage.appendChild(e); return e; };
   const pinSlat = mkPin("Slat"), pinTrack = mkPin("Slat track"), pinSpar = mkPin("Front spar"), pinTank = mkPin("Fuel tank");
   const loadEl = document.getElementById("scene-load");
@@ -491,12 +492,12 @@
     fA0: { value: blank }, fA1: { value: blank }, fB0: { value: blank }, fB1: { value: blank },
     bA0: { value: NOBOX }, bA1: { value: NOBOX }, bB0: { value: NOBOX }, bB1: { value: NOBOX }, dTex: { value: blank },
     t: { value: 0 }, hasB: { value: 0 }, res: { value: new T.Vector2(1, 1) }, camPos: { value: new T.Vector3() },
-    invVP: { value: new T.Matrix4() }, VPa: { value: new T.Matrix4() }, VPb: { value: new T.Matrix4() }, hasD: { value: 0 }, dist: { value: 50 } };
+    invVP: { value: new T.Matrix4() }, VPa: { value: new T.Matrix4() }, VPb: { value: new T.Matrix4() }, hasD: { value: 0 }, dist: { value: 50 }, ghost: { value: 0 } };
   const plateMat = new T.ShaderMaterial({ uniforms: plateU, depthTest: false, depthWrite: false,
     vertexShader: "void main(){ gl_Position = vec4(position.xy, 0.0, 1.0); }",
     fragmentShader: [
       "uniform sampler2D pA, mA, gA, pB, mB, gB, fA0, fA1, fB0, fB1, dTex; uniform vec4 bA0, bA1, bB0, bB1;",
-      "uniform float t, hasB, hasD, dist; uniform vec2 res; uniform vec3 camPos; uniform mat4 invVP, VPa, VPb;",
+      "uniform float t, hasB, hasD, dist, ghost; uniform vec2 res; uniform vec3 camPos; uniform mat4 invVP, VPa, VPb;",
       "const vec2 RP = vec2(" + RW + ".0, " + RH + ".0);",
       "vec2 toRef(mat4 VP, vec4 X) { vec4 c = VP * X; vec2 n = c.xy / c.w; return vec2((n.x * 0.5 + 0.5) * RP.x, (0.5 - n.y * 0.5) * RP.y); }",
       "vec3 world(vec2 ndc, float d) { vec4 w = invVP * vec4(ndc, d * 2.0 - 1.0, 1.0); return w.xyz / w.w; }",
@@ -504,11 +505,15 @@
       "vec3 photo(sampler2D P, sampler2D F0, sampler2D F1, vec4 b0, vec4 b1, vec2 rp) {",
       "  vec3 c = texture2D(P, rp / RP).rgb; vec4 f = fan(F0, b0, rp); c = mix(c, f.rgb, f.a); f = fan(F1, b1, rp); return mix(c, f.rgb, f.a); }",
       "vec3 frame(mat4 VP, sampler2D P, sampler2D M, sampler2D G, sampler2D F0, sampler2D F1, vec4 b0, vec4 b1, vec3 dir, vec3 X, float ac) {",
+      // the sky behind: the photo, or the sky plate where the photo shows aircraft
       "  vec2 us = toRef(VP, vec4(dir, 0.0)) / RP;",
-      "  vec3 sky = mix(texture2D(P, us).rgb, texture2D(G, us).rgb, texture2D(M, us).a);",
+      "  vec3 sky = mix(texture2D(P, us).rgb, texture2D(G, us).rgb, smoothstep(0.0, 0.05, texture2D(M, us).a));",
       "  if (ac < 0.5) return sky;",
-      "  vec2 ra = toRef(VP, vec4(X, 1.0));",
-      "  return mix(sky, photo(P, F0, F1, b0, b1, ra), texture2D(M, ra / RP).a); }",
+      // the aircraft premultiplied (the photo less the sky seen through it) over that sky: at the frame's own camera
+      // this is the photo exactly, see-through x-ray parts included
+      "  vec2 ra = toRef(VP, vec4(X, 1.0)), ua = ra / RP; float m = texture2D(M, ua).a;",
+      "  vec3 air = photo(P, F0, F1, b0, b1, ra) - (1.0 - m) * texture2D(G, ua).rgb;",
+      "  return mix(sky, air + (1.0 - m) * sky, smoothstep(0.0, 0.05, m)); }",
       // the nearest aircraft depth on rings of 2 to 22 reference pixels
       "float nearDepth(vec2 uv, float s) {",
       "  for (int r = 0; r < 6; r++) {",
@@ -521,7 +526,7 @@
       "  float d = texture2D(dTex, uv).r, mS = texture2D(mA, toRef(VPa, vec4(dir, 0.0)) / RP).a;",
       "  if (d >= 1.0 && (mS > 0.0 || (hasB > 0.5 && texture2D(mB, toRef(VPb, vec4(dir, 0.0)) / RP).a > 0.0))) d = nearDepth(uv, res.y / RP.y);",
       "  float ac = d < 1.0 ? 1.0 : 0.0; vec3 X = world(ndc, min(d, 0.9999999));",
-      "  if (hasD < 0.5) { ac = 1.0; X = camPos + dir * dist; }             // aircraft not loaded yet: one plane at its distance",
+      "  if (hasD < 0.5 || (ghost > 0.5 && ac < 0.5 && mS > 0.0)) { ac = 1.0; X = camPos + dir * dist; }   // aircraft not loaded yet, or the x-ray's see-through ghost: one plane at the subject's distance",
       "  vec3 c = frame(VPa, pA, mA, gA, fA0, fA1, bA0, bA1, dir, X, ac);",
       "  if (hasB > 0.5) c = mix(c, frame(VPb, pB, mB, gB, fB0, fB1, bB0, bB1, dir, X, ac), t);",
       "  gl_FragColor = vec4(c, 1.0); }"].join("\n") });
@@ -554,6 +559,7 @@
       const twins = new Map(); depthList = [];
       scene.traverse(o => { if (!(o.layers.mask & 1) || !(o.isMesh || o.isLine || o.isPoints)) return;
         const m = o.material, solid = o.isMesh && m && m !== sparMat;
+        // two depth-only materials (cut by the x-ray plane or not), both sides: the nearest surface wins either way
         const ck = m && m.clippingPlanes ? "clip" : "solid";
         let tw = null; if (solid) { tw = twins.get(ck); if (!tw) { tw = new T.MeshBasicMaterial({ colorWrite: false, side: T.DoubleSide, clippingPlanes: m.clippingPlanes || null }); twins.set(ck, tw); } }
         depthList.push([o, m, tw, true]); });
@@ -697,7 +703,7 @@
       // chapter 1: x-ray of the inboard leading edge
       const xr = smooth(pS, .24, .32) * (1 - smooth(pS, .52, .6));
       // a scan plane sweeps aft through the aircraft; ahead of it the skin is cut away to show the structure inside
-      const sx = lerp(-1.5, 41, xr); scan.constant = -sx;
+      const sx = lerp(-1.5, 41, xr); scan.constant = -sx; plateU.ghost.value = xr > .001 ? 1 : 0;
       ghostMat.uniforms.amt.value = xr; ghostMat.uniforms.sweep.value = sx; ghostMat.uniforms.band.value = Math.sin(Math.PI * xr) * (xr < .999 ? 1 : 0); wireMat.opacity = .85 * xr;
       // the slat stows (track runs aft through the spar into the can), holds, then runs out again
       const ret = smooth(pS, .33, .42) * (1 - smooth(pS, .45, .5));
