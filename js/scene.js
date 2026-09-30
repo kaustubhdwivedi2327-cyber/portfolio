@@ -83,7 +83,7 @@
 
   /* ---------- renderer, scene, environment ---------- */
   const renderer = new T.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: "high-performance" });
-  let dpr = Math.min(devicePixelRatio || 1, small ? 1.5 : 1.75);
+  let dpr = Math.min(devicePixelRatio || 1, small ? 1.5 : 2);
   renderer.setPixelRatio(dpr);
   renderer.outputEncoding = T.sRGBEncoding; renderer.toneMapping = T.ACESFilmicToneMapping; renderer.toneMappingExposure = .92; renderer.localClippingEnabled = true;
   renderer.shadowMap.enabled = false;
@@ -319,7 +319,9 @@
   // layout is measured here, never inside the frame loop (a read there after the loop's own style writes forces a layout every frame)
   let sW = 1, sH = 1, fTop = 0, fH = 1, vH = innerHeight;
   const measure = () => { sW = stage.clientWidth || sW; sH = stage.clientHeight || sH; fTop = flight.offsetTop; fH = flight.offsetHeight; vH = innerHeight; };
-  const resize = () => { measure(); renderer.setSize(sW, sH, false); camera.aspect = sW / sH; camera.updateProjectionMatrix(); };
+  // over the rendered frames (1200 px tall) a canvas taller than ~1350 px adds no detail, only cost
+  const photoMode = () => innerWidth >= 760 && (window.FRAMES || []).length > 0 && sW / sH > 1.05 && sW / sH <= 2640 / 1200 + .01;
+  const resize = () => { measure(); renderer.setPixelRatio(photoMode() ? Math.min(dpr, Math.max(1, 1350 / sH)) : dpr); renderer.setSize(sW, sH, false); camera.aspect = sW / sH; camera.updateProjectionMatrix(); };
   new ResizeObserver(resize).observe(stage); new ResizeObserver(measure).observe(flight); addEventListener("resize", measure); resize();
   // on short screens the intro can be taller than the space under the top bar: it scrolls up before it fades
   let c0Over = 0; const c0Wrap = chaps[0] && chaps[0].querySelector(".wrap");
@@ -332,48 +334,182 @@
 
   /* ---------- photoreal Blender frames (desktop): opening sequence, bird-strike plate, pull-back sequence ---------- */
   const RS = "assets/render/", RW = 2640, RH = 1200;
-  const FR = (window.FRAMES || []).map(([p, n]) => ({ p, src: RS + n + ".webp" }));
-  // frames: fetched once as compressed files, decoded off the main thread into bitmaps only around the reader
-  const blobs = [], bmps = [], st = [];            // st: 0 new, 1 fetching, 2 have file, 3 decoding, 4 decoded, 5 failed
-  const has = k => !!bmps[k];
-  const plate = document.createElement("canvas"); plate.className = "plate"; plate.setAttribute("aria-hidden", "true"); stage.insertBefore(plate, canvas);
-  const pctx = plate.getContext("2d"); let plateKey = "";
+  const FR = (window.FRAMES || []).map(([p, n, fan]) => ({ p, n, src: RS + n + ".webp", fan }));
+  // frames: fetched once (a two-thirds-size photo for scrolling with the aircraft matte in its alpha, and the sky
+  // plate), decoded off the main thread only around the reader, uploaded to the GPU ahead; once the reader stops, the
+  // full-size photo of the frames on screen replaces the scrolling copy
+  const blobs = [], bmps = [], bgs = [], texs = [], st = [], hi = [];   // hi[k]: { st, bm, tex, up } full-size photo     // st: 0 new, 1 fetching, 2 have files, 3 decoding, 4 decoded, 5 failed
+  const has = k => !!bmps[k], onGPU = k => !!(texs[k] && texs[k].up);     // decoded / on the GPU
   const photoOK = () => innerWidth >= 760 && FR.length > 0 && camera.aspect > 1.05 && camera.aspect <= RW / RH + .01;
   const frameAt = p => { let lo = 0, hi = FR.length - 1; while (hi - lo > 1) { const m = (lo + hi) >> 1; if (FR[m].p <= p) lo = m; else hi = m; } return lo; };
-  // files stream in nearest-first (six at a time); frames near the reader are decoded (four at a time, up to AHEAD
-  // in the scroll direction and BEHIND the other way) and those further than DROP are released, so memory stays bounded
-  const AHEAD = 7, BEHIND = 3, DROP = 9;
-  let fetching = 0, decoding = 0, lastC = 0, dir = 1;
-  function feed(p) {
+  // files stream in nearest-first (six frames at a time); frames near the reader are decoded (four at a time, up to AHEAD
+  // in the scroll direction and BEHIND the other way, every other one first) and those further than DROP are released
+  const AHEAD = 10, BEHIND = 3, DROP = 12;
+  const DECODE_ORDER = [0, 1, 2, 4, 6, 8, 10, 3, 5, 7, 9];
+  let fetching = 0, decoding = 0, lastC = 0, dir = 1, vel = 0, velT = 0, upT = 0;
+  const get = url => fetch(url).then(r => r.ok ? r.blob() : null, () => null);
+  const bitmap = (b, o) => b ? createImageBitmap(b, o).catch(() => null) : null;
+  const straight = { premultiplyAlpha: "none" };
+  const idle = window.requestIdleCallback ? f => requestIdleCallback(f, { timeout: 1500 }) : f => setTimeout(f, 200);
+  const blank = (() => { const t = new T.DataTexture(new Uint8Array([0, 0, 0, 0]), 1, 1); t.needsUpdate = true; return t; })();
+  const texOf = bm => { const t = new T.Texture(bm); t.flipY = false; t.generateMipmaps = false; t.minFilter = t.magFilter = T.LinearFilter; t.needsUpdate = true;
+    t.onUpdate = () => { t.image = { width: bm.width, height: bm.height }; }; return t; };   // drop the decoded copy once it is on the GPU
+  const release = k => {
+    dropHi(k);
+    bmps[k] = bgs[k] = null;
+    if (texs[k]) { for (const t of [texs[k].ph, texs[k].g]) if (t !== blank) t.dispose(); texs[k] = null; }
+  };
+  const texFor = k => texs[k] || (texs[k] = { ph: texOf(bmps[k]), g: bgs[k] ? texOf(bgs[k]) : blank, up: false });
+  // a worker fetches and decodes; the page only sends requests and receives decoded bitmaps
+  const WSRC = [
+    "const files = new Map();",
+    "const get = u => fetch(u).then(r => r.ok ? r.blob() : null, () => null);",
+    "self.onmessage = async e => { const d = e.data;",
+    "  if (d.cmd === 'fetch') { const [ph, g] = await Promise.all(d.urls.map(get)); if (ph) files.set(d.k, { ph, g }); postMessage({ cmd: 'fetched', k: d.k, ok: !!ph }); }",
+    "  else if (d.cmd === 'decode') { const f = files.get(d.k); if (!f) { postMessage({ cmd: 'decoded', k: d.k }); return; }",
+    "    try { const [b, g] = await Promise.all([createImageBitmap(f.ph, { premultiplyAlpha: 'none' }), f.g ? createImageBitmap(f.g) : null]);",
+    "      postMessage({ cmd: 'decoded', k: d.k, b, g }, g ? [b, g] : [b]); } catch (err) { postMessage({ cmd: 'decoded', k: d.k }); } }",
+    "  else if (d.cmd === 'full') { const b = await get(d.url); let bm = null; try { bm = b ? await createImageBitmap(b) : null; } catch (err) {}",
+    "    postMessage({ cmd: 'full', k: d.k, bm }, bm ? [bm] : []); } };"].join("\n");
+  let worker = null;
+  try { worker = new Worker(URL.createObjectURL(new Blob([WSRC], { type: "text/javascript" }))); } catch (e) { worker = null; }
+  const abs = u => new URL(u, location.href).href;
+  if (worker) {
+    worker.onerror = () => { worker = null; };
+    worker.onmessage = e => { const d = e.data, k = d.k;
+      if (d.cmd === "fetched") { fetching--; st[k] = d.ok ? 2 : 5; }
+      else if (d.cmd === "decoded") { decoding--;
+        if (!d.b) { st[k] = 5; return; }
+        if (Math.abs(k - lastC) > DROP) st[k] = 2; else { bmps[k] = d.b; bgs[k] = d.g || null; st[k] = 4; } }
+      else if (d.cmd === "full") { const h = hi[k]; if (!h || !d.bm) { if (h) h.st = 3; return; } h.bm = d.bm; h.st = 2; } };
+  }
+  const dropHi = k => { const h = hi[k]; if (!h) return; if (h.tex) h.tex.dispose(); hi[k] = null; };
+  function feed(p, rest) {
     if (!photoOK()) return;
-    const c = frameAt(p); if (c !== lastC) { dir = c > lastC ? 1 : -1; lastC = c; }
+    const c = frameAt(p), now = performance.now(), dtv = Math.min(.1, Math.max(.001, (now - velT) / 1000)); velT = now;
+    vel += (Math.abs(c - lastC) / dtv - vel) * Math.min(1, dtv * 6);               // frames per second the reader is passing
+    if (c !== lastC) { dir = c > lastC ? 1 : -1; lastC = c; }
+    const stride = Math.max(1, Math.min(4, Math.round(vel / 50)));                     // ~one decoded frame per refresh when fast
     for (let r = 0; r < FR.length && fetching < 6; r++) for (const k of [c + r * dir, c - r * dir]) {
       if (fetching >= 6 || k < 0 || k >= FR.length || st[k]) continue;
       fetching++; st[k] = 1;
-      fetch(FR[k].src).then(res => res.ok ? res.blob() : Promise.reject(res.status))
-        .then(b => { blobs[k] = b; st[k] = 2; }, () => { st[k] = 5; }).finally(() => { fetching--; });
+      if (worker) { worker.postMessage({ cmd: "fetch", k, urls: [abs(RS + "m/" + FR[k].n + ".webp"), abs(RS + "bg/" + FR[k].n + ".webp")] }); continue; }
+      Promise.all([get(RS + "m/" + FR[k].n + ".webp"), get(RS + "bg/" + FR[k].n + ".webp")])
+        .then(([ph, g]) => { if (ph) { blobs[k] = { ph, g }; st[k] = 2; } else st[k] = 5; }).finally(() => { fetching--; });
     }
-    for (let r = 0; r <= AHEAD && decoding < 4; r++) for (const k of r <= BEHIND ? [c + r * dir, c - r * dir] : [c + r * dir]) {
+    for (const r0 of DECODE_ORDER) for (const k of r0 <= BEHIND ? [c + r0 * stride * dir, c - r0 * dir] : [c + r0 * stride * dir]) {
       if (decoding >= 4 || k < 0 || k >= FR.length || st[k] !== 2) continue;
       decoding++; st[k] = 3;
-      createImageBitmap(blobs[k]).then(b => { if (Math.abs(k - lastC) > DROP) { b.close(); st[k] = 2; } else { bmps[k] = b; st[k] = 4; } }, () => { st[k] = 5; })
+      if (worker) { worker.postMessage({ cmd: "decode", k }); continue; }
+      const f = blobs[k];              // decoded at full size: the GPU scales it when drawing (a resize here runs on the GPU process's main thread)
+      Promise.all([bitmap(f.ph, straight), bitmap(f.g, {})])
+        .then(([b, g]) => {
+          if (!b) { st[k] = 5; return; }
+          if (Math.abs(k - lastC) > DROP) st[k] = 2;
+          else { bmps[k] = b; bgs[k] = g; st[k] = 4; } })
         .finally(() => { decoding--; });
     }
-    for (let k = 0; k < FR.length; k++) if (bmps[k] && Math.abs(k - c) > DROP) { bmps[k].close(); bmps[k] = null; st[k] = 2; }
+    for (let k = 0; k < FR.length; k++) if (bmps[k] && Math.abs(k - c) > DROP * stride && !(lastPair && (k === lastPair[0] || k === lastPair[1]))) { release(k); st[k] = 2; }
+    // at rest: the full-size photos of the frames on screen (fetched, decoded, then uploaded like the rest)
+    const onScreen = lastPair ? [lastPair[0], lastPair[1]].filter(k => k >= 0) : [];
+    if (rest) for (const k of onScreen) if (!hi[k] && has(k)) {
+      const h = hi[k] = { st: 1 };
+      if (worker) { worker.postMessage({ cmd: "full", k, url: abs(FR[k].src) }); continue; }
+      get(FR[k].src).then(b => bitmap(b, {})).then(bm => { if (hi[k] !== h) return; if (bm) { h.bm = bm; h.st = 2; } else h.st = 3; });
+    }
+    for (let k = 0; k < FR.length; k++) if (hi[k] && Math.abs(k - c) > 3 && !onScreen.includes(k)) dropHi(k);
+    // upload ahead: one frame per screen update (a scrolling copy is ~3 ms, a full-size photo ~7 ms), nearest first
+    let up = 0;
+    if (rest) for (const k of onScreen) { const h = hi[k]; if (up < 1 && h && h.st === 2 && !h.up && onGPU(k)) { h.tex = texOf(h.bm); renderer.initTexture(h.tex); h.up = true; up++; } }
+    // ahead-of-need uploads are paced (~30 a second) so a fast scroll does not upload on every refresh; the frames the
+    // reader is at go up straight away
+    let near = false;                   // is any frame near the reader already on the GPU?
+    for (let k = Math.max(0, c - 12); k <= Math.min(FR.length - 1, c + 13) && !near; k++) near = onGPU(k) && Math.abs(FR[k].p - p) < .02;
+    for (const r of [0, 1, 2, 3, 4, 5, 6]) for (const k of r ? [c + r * stride * dir, c - r * dir] : [c, c + dir]) {
+      if (near && now - upT < 33) continue;
+      if (up >= 1 || k < 0 || k >= FR.length || !has(k) || (texs[k] && texs[k].up)) continue;
+      const tx = texFor(k); for (const t of [tx.ph, tx.g]) if (t !== blank) renderer.initTexture(t); tx.up = true; up++; upT = now;
+    }
   }
-  function drawPlate(p, ox, oy) {
-    const i = frameAt(p), t = FR[i + 1] ? clamp((p - FR[i].p) / (FR[i + 1].p - FR[i].p)) : 0;
-    let a = -1; for (const k of [i, i + 1, i - 1, i + 2, i - 2, i + 3, i - 3, i + 4, i - 4, i + 5, i - 5, i + 6, i - 6]) if (has(k) && Math.abs(FR[k].p - p) < .02) { a = k; break; }
-    if (a < 0) return plateKey ? "stale" : false;
-    const useB = a === i && t > .01 && has(i + 1);
-    const pr = Math.min(devicePixelRatio || 1, 2), W = Math.round(sW * pr), H = Math.round(sH * pr);
-    const key = [a, useB ? t.toFixed(3) : "", W, H, ox.toFixed(1), oy.toFixed(1)].join("|");
-    if (key === plateKey) return true;
-    plateKey = key; if (plate.width !== W || plate.height !== H) { plate.width = W; plate.height = H; }
-    const sc_ = H / RH, dw = RW * sc_, x = (W - dw) / 2 - ox * pr, y = -oy * pr;
-    pctx.globalAlpha = 1; pctx.drawImage(bmps[a], x, y, dw, H);
-    if (useB) { pctx.globalAlpha = t; pctx.drawImage(bmps[i + 1], x, y, dw, H); }
-    return true;
+  // spinning fans: the fan regions re-rendered at six blade angles, cycled while the reader is still
+  const fanCrops = new Map();                     // frame index -> "loading" | "none" | [{ box, tx: [6 textures] }]
+  function loadFans(k) {
+    const f = FR[k]; if (!f || !f.fan || fanCrops.has(k)) return;
+    fanCrops.set(k, "loading");
+    Promise.all(f.fan.map(([e, x0, y0, x1, y1]) => Promise.all([0, 1, 2, 3, 4, 5].map(ph =>
+      fetch(RS + "fan/" + f.n + "_e" + e + "_k" + ph + ".webp").then(r => r.ok ? r.blob() : Promise.reject(r.status)).then(b => createImageBitmap(b, straight)).then(texOf)))
+      .then(tx => ({ box: new T.Vector4(x0, y0, x1, y1), tx }))))
+      .then(list => { fanCrops.set(k, list); for (const [j, v] of fanCrops) if (Math.abs(j - k) > 8) { if (Array.isArray(v)) v.forEach(o => o.tx.forEach(t => t.dispose())); fanCrops.delete(j); } },
+            () => fanCrops.set(k, "none"));
+  }
+  function fanPhase(a, b, rest, now) {         // blade phase to show, or -1 for the frame's own
+    if (!rest || !FR[a].fan || (b >= 0 && !FR[b].fan)) return -1;
+    loadFans(a); if (b >= 0) loadFans(b);
+    if (!Array.isArray(fanCrops.get(a)) || (b >= 0 && !Array.isArray(fanCrops.get(b)))) return -1;
+    return Math.floor(now / 1000 * 24) % 6;
+  }
+  // the plate: one full-screen pass. Sky layer = the photo with the aircraft hole filled from the sky plate; aircraft
+  // layer = the photo (with the fan crops) through the matte, shifted by the mouse; both blended between the frames on screen
+  const NOBOX = new T.Vector4(-1, -1, -1, -1);
+  const plateU = { pA: { value: blank }, mA: { value: blank }, gA: { value: blank }, pB: { value: blank }, mB: { value: blank }, gB: { value: blank },
+    fA0: { value: blank }, fA1: { value: blank }, fB0: { value: blank }, fB1: { value: blank },
+    bA0: { value: NOBOX }, bA1: { value: NOBOX }, bB0: { value: NOBOX }, bB1: { value: NOBOX },
+    t: { value: 0 }, hasB: { value: 0 }, res: { value: new T.Vector2(1, 1) }, x0: { value: 0 }, sc: { value: 1 }, sAc: { value: new T.Vector2() }, sBg: { value: new T.Vector2() } };
+  const plateMat = new T.ShaderMaterial({ uniforms: plateU, depthTest: false, depthWrite: false,
+    vertexShader: "void main(){ gl_Position = vec4(position.xy, 0.0, 1.0); }",
+    fragmentShader: [
+      "uniform sampler2D pA, mA, gA, pB, mB, gB, fA0, fA1, fB0, fB1; uniform vec4 bA0, bA1, bB0, bB1;",
+      "uniform float t, hasB, x0, sc; uniform vec2 res, sAc, sBg;",
+      "const vec2 RP = vec2(" + RW + ".0, " + RH + ".0);",
+      "vec2 rpx(vec2 s) { vec2 q = vec2(gl_FragCoord.x - s.x, res.y - gl_FragCoord.y - s.y); return vec2((q.x - x0) / sc, q.y / sc); }",
+      "vec4 fan(sampler2D ft, vec4 b, vec2 rp) { if (b.x < 0.0 || rp.x < b.x || rp.y < b.y || rp.x > b.z || rp.y > b.w) return vec4(0.0); return texture2D(ft, (rp - b.xy) / (b.zw - b.xy)); }",
+      "vec3 photo(sampler2D P, sampler2D F0, sampler2D F1, vec4 b0, vec4 b1, vec2 rp) {",
+      "  vec3 c = texture2D(P, rp / RP).rgb; vec4 f = fan(F0, b0, rp); c = mix(c, f.rgb, f.a); f = fan(F1, b1, rp); return mix(c, f.rgb, f.a); }",
+      "void main() {",
+      "  vec2 rb = rpx(sBg), ra = rpx(sAc), ub = rb / RP, ua = ra / RP;",
+      "  vec3 bg = mix(texture2D(pA, ub).rgb, texture2D(gA, ub).rgb, texture2D(mA, ub).a);",
+      "  if (hasB > 0.5) bg = mix(bg, mix(texture2D(pB, ub).rgb, texture2D(gB, ub).rgb, texture2D(mB, ub).a), t);",
+      "  vec3 c = mix(bg, photo(pA, fA0, fA1, bA0, bA1, ra), texture2D(mA, ua).a);",
+      "  if (hasB > 0.5) c = mix(c, photo(pB, fB0, fB1, bB0, bB1, ra), texture2D(mB, ua).a * t);",
+      "  gl_FragColor = vec4(c, 1.0); }"].join("\n") });
+  const plateScene = new T.Scene(), plateQuad = new T.Mesh(new T.PlaneGeometry(2, 2), plateMat); plateQuad.frustumCulled = false; plateScene.add(plateQuad);
+  // compiled and drawn once (empty) while the page is still loading, so the first real frame does not stall on it
+  if (photoOK()) try { renderer.compile(plateScene, camera); renderer.setClearColor(0x000000, 0); renderer.render(plateScene, camera); renderer.clear(); } catch (e) {}
+  let plateOn = false, lastPair = null, pax = 0, pay = 0, pbx = 0;
+  const bufSize = new T.Vector2();
+  function setFans(pre, k, ph) {
+    const list = ph >= 0 ? fanCrops.get(k) : null;
+    for (const e of [0, 1]) {
+      const o = Array.isArray(list) && list[e];
+      plateU["f" + pre + e].value = o ? o.tx[ph] : blank; plateU["b" + pre + e].value = o ? o.box : NOBOX;
+    }
+  }
+  function updatePlate(p, rest, now) {
+    // the nearest decoded frame at or before the reader and the nearest after, blended by position (frames may be
+    // skipped while scrolling fast)
+    const i = frameAt(p);
+    let a = -1, b = -1, tt = 0, res = true;
+    for (let k = i; k >= Math.max(0, i - 12); k--) if (onGPU(k)) { a = k; break; }            // only frames already on the GPU,
+    for (let k = i + 1; k <= Math.min(FR.length - 1, i + 13); k++) if (onGPU(k)) { b = k; break; }   // so drawing never uploads
+    if (a >= 0 && Math.abs(FR[a].p - p) > .02) a = -1;
+    if (b >= 0 && Math.abs(FR[b].p - p) > .02) b = -1;
+    if (a < 0 && b >= 0) { a = b; b = -1; }
+    if (a >= 0 && b >= 0) { tt = clamp((p - FR[a].p) / (FR[b].p - FR[a].p)); if (tt < .01) b = -1; else if (tt > .99) { a = b; b = -1; tt = 0; } }
+    if (a < 0) {
+      if (lastPair && onGPU(lastPair[0]) && (lastPair[1] < 0 || onGPU(lastPair[1]))) { [a, b, tt] = lastPair; res = "stale"; }
+      else return false;
+    }
+    lastPair = [a, b, tt];
+    const ph = res === true ? fanPhase(a, b, rest, now) : -1;
+    const A = texFor(a), Bx = b >= 0 ? texFor(b) : A, full = k => hi[k] && hi[k].up ? hi[k].tex : texs[k].ph;
+    plateU.pA.value = full(a); plateU.mA.value = A.ph; plateU.gA.value = A.g;          // the matte is the scrolling copy's alpha
+    plateU.pB.value = b >= 0 ? full(b) : plateU.pA.value; plateU.mB.value = Bx.ph; plateU.gB.value = Bx.g;
+    plateU.t.value = tt; plateU.hasB.value = b >= 0 ? 1 : 0;
+    setFans("A", a, ph); setFans("B", b >= 0 ? b : a, b >= 0 ? ph : -1);
+    renderer.getDrawingBufferSize(bufSize); const pr = renderer.getPixelRatio(), sc = bufSize.y / RH;
+    plateU.res.value.copy(bufSize); plateU.sc.value = sc; plateU.x0.value = (bufSize.x - RW * sc) / 2;
+    plateU.sAc.value.set(pax * pr, pay * pr); plateU.sBg.value.set(pbx * pr, 0);
+    return res;
   }
   // compositing: sky and live aircraft fade in over the photo; overlays (lights, bird, contour, x-ray) always on top, masked by the aircraft's depth
   const liveRT = new T.WebGLRenderTarget(2, 2, { type: T.HalfFloatType, samples: renderer.capabilities.isWebGL2 ? 4 : 0 });
@@ -383,6 +519,7 @@
   const depthOnly = new T.MeshBasicMaterial({ colorWrite: false, side: T.DoubleSide });
   function compose(Lv, over) {
     renderer.autoClear = false; renderer.setRenderTarget(null); renderer.setClearColor(0x000000, 0); renderer.clear();
+    if (plateOn) renderer.render(plateScene, quadCam);
     if (Lv > .001 && skyReady) { skyBall.position.copy(camera.position); skyMat.uniforms.opacity.value = Lv; renderer.render(skyScene, camera); }
     if (Lv > .999) { camera.layers.enableAll(); renderer.render(scene, camera); }
     else {
@@ -530,23 +667,26 @@
 
     // camera; mouse parallax only while the view is live (the photos are fixed frames)
     camAt(pS);
-    const want = photoOK() ? 0 : 1; feed(pS); if (want || liveEase > 0) loadSky();
+    const want = photoOK() ? 0 : 1; feed(pS, Math.abs(p - pS) < 3e-4); if (want || liveEase > 0) loadSky();
     smx += (mx - smx) * Math.min(1, dt * 3); smy += (my - smy) * Math.min(1, dt * 3);
     const d = tmpP.distanceTo(tmpT) * .02 * want * want;
+    // over the rendered frames the mouse slides the aircraft against the sky instead, most in the wide shots
+    const pst = want < .999 ? clamp((tmpP.distanceTo(tmpT) - 8) / 40) : 0;
+    pax = -smx * 36 * pst; pay = -smy * 18 * pst; pbx = smx * 12 * pst;
     camera.position.set(tmpP.x + smx * d * 3, tmpP.y - smy * d * 2, tmpP.z + smx * d);
     look.copy(tmpT); camera.lookAt(look);
     const off = Math.min(smooth(pS, .2, .3), 1 - smooth(pS, .82, .92)) * (camera.aspect > 1 ? 1 : 0), cw = sW, ch = sH;
     const mOff = camera.aspect < 1 ? 1 - smooth(pS, .1, .24) : 0;
     // close-ups move the subject right and up by fixed fractions of the height (the rendered frames have the same shift baked in)
-    if (off > .001) camera.setViewOffset(cw, ch, -ch * .224 * off, ch * .06 * off, cw, ch);
+    if (off > .001 || pax || pay) camera.setViewOffset(cw, ch, -ch * .224 * off - pax, ch * .06 * off - pay, cw, ch);
     else if (mOff > .001) camera.setViewOffset(cw, ch, 0, -ch * .2 * mOff, cw, ch); else camera.clearViewOffset();
-    const pl = want < .999 ? drawPlate(pS, 0, 0) : false, shown = !!pl;
+    const pl = want < .999 ? updatePlate(pS, Math.abs(p - pS) < 3e-4, now) : false, shown = !!pl;
+    plateOn = shown; if (stage.dataset.photo !== (shown ? "1" : "0")) stage.dataset.photo = shown ? "1" : "0";
     photoEase += ((shown ? 1 : 0) - photoEase) * Math.min(1, dt * 4);
     if (shown && photoEase > .98) photoEase = 1;
     if (liveEase < 0) liveEase = want;
     liveEase += (want - liveEase) * Math.min(1, dt * 4); if (Math.abs(want - liveEase) < .02) liveEase = want;
     hideOv = want < .999 && (!shown || pl === "stale");        // photo not (yet) the right one: no glows or labels over it
-    setS(plate, "visibility", photoEase > .002 && want < .999 ? "visible" : "hidden");
     if (shown && loadEl) loadEl.classList.add("done");
     compose(liveEase, !hideOv);
 
