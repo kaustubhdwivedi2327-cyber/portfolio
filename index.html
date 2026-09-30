@@ -2,22 +2,16 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Kaustubh Dwivedi · Aerospace Structures & Design Engineer</title>
   <meta name="description" content="Portfolio of Kaustubh Dwivedi, aerospace structures and design engineer: LPBF redesign of an Airbus A320 slat-track can, SPH–FEA bird-strike assessment of composite leading edges, and published research on 3D-printed lattice structures." />
   <meta property="og:type" content="website" />
   <meta property="og:title" content="Kaustubh Dwivedi · Aerospace Structures & Design Engineer" />
   <meta property="og:description" content="LPBF redesign of an Airbus A320 slat-track can 20.6 % lighter than the existing welded design. SPH–FEA bird-strike assessment of composite leading edges. First-author publication in Materials Today Communications." />
-  <script>
-    // Theme before first paint, no flash.
-    (function () {
-      var t = null;
-      try { t = localStorage.getItem("theme"); } catch (e) {}
-      if (!t) t = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-      document.documentElement.setAttribute("data-theme", t);
-      try { if (localStorage.getItem("kd-motion") === "off") document.documentElement.classList.add("reduce"); } catch (e) {}
-    })();
-  </script>
+  <meta property="og:image" content="https://kaustubhdwivedi2327-cyber.github.io/portfolio/assets/og.jpg" />
+  <meta property="og:url" content="https://kaustubhdwivedi2327-cyber.github.io/portfolio/" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="canonical" href="https://kaustubhdwivedi2327-cyber.github.io/portfolio/" />
   <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
   <script type="application/ld+json">
   {"@context":"https://schema.org","@type":"Person","name":"Kaustubh Dwivedi","jobTitle":"Aerospace Structures & Design Engineer","affiliation":{"@type":"CollegeOrUniversity","name":"Cranfield University"},"alumniOf":[{"@type":"CollegeOrUniversity","name":"Symbiosis Institute of Technology, Pune"}],"email":"mailto:kaustubhdwivedi2327@gmail.com","sameAs":["https://www.linkedin.com/in/kaustubh-dwivedi-65586324a/","https://orcid.org/0009-0004-6472-7732","https://www.researchgate.net/scientific-contributions/Kaustubh-Dwivedi-2272720523"],"knowsAbout":["Finite element analysis","Composite structures","Additive manufacturing","Bird strike","Abaqus","CATIA"]}
@@ -28,100 +22,34 @@
   <script type="application/ld+json">
   {"@context":"https://schema.org","@type":"ScholarlyArticle","headline":"Comparative SPH–Finite Element Assessment of Aerospace Material Systems Under Bird-Strike Loading","author":[{"@type":"Person","name":"Mohsen Lalehparvar"},{"@type":"Person","name":"Alex Nuttall"},{"@type":"Person","name":"Dhruva Bavaria"},{"@type":"Person","name":"Felix Massó Etxeberria"},{"@type":"Person","name":"Kaustubh Dwivedi"},{"@type":"Person","name":"Hessam Ghasemnejad"},{"@type":"Person","name":"Pablo Coladas Mato"},{"@type":"Person","name":"Wydo van de Waerdt"}],"datePublished":"2026-09-07","isPartOf":{"@type":"Periodical","name":"Journal of Manufacturing and Materials Processing"},"identifier":"https://doi.org/10.3390/jmmp10090343","license":"https://creativecommons.org/licenses/by/4.0/"}
   </script>
-  <meta property="og:image" content="https://kaustubhdwivedi2327-cyber.github.io/portfolio/assets/og.jpg" />
-  <meta property="og:url" content="https://kaustubhdwivedi2327-cyber.github.io/portfolio/" />
-  <link rel="canonical" href="https://kaustubhdwivedi2327-cyber.github.io/portfolio/" />
-  <meta name="twitter:card" content="summary_large_image" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="css/style.css" />
+  <script>
+    // saved day/night choice before first paint, so the page never flashes the other theme
+    try { var t = localStorage.getItem("kd-theme"); if (t === "dark" || t === "light") document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
+  <style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="css/base.css">
+  <link rel="stylesheet" href="css/home.css">
+  <link rel="stylesheet" href="css/case.css">
+  <link rel="stylesheet" href="css/finish.css">
 </head>
 <body>
-
-  <!-- custom cursor (pointer devices only) -->
-  <div class="cursor" id="cursor" aria-hidden="true">
-    <div class="cursor-dot"></div>
-    <div class="cursor-ring"></div>
-  </div>
-
-  <!-- intro -->
-  <div class="preloader" id="preloader" aria-hidden="true">
-    <div class="preloader-inner">
-      <div class="preloader-name"><span>Kaustubh</span> <span>Dwivedi</span></div>
-      <div class="preloader-line"><i></i></div>
-      <div class="preloader-sub">Aerospace Structures &amp; Design</div>
-    </div>
-  </div>
-
-  <!-- page transition wipe -->
-  <div class="wipe" id="wipe" aria-hidden="true"></div>
-
-  <!-- scroll progress -->
-  <div class="progress" id="progress" aria-hidden="true"></div>
-
-  <header class="topbar" id="topbar">
-    <a class="brand" href="#/" data-magnetic>
-      <span class="brand-mark"></span>
-      <span>K. Dwivedi</span>
-    </a>
-    <nav class="nav" id="nav">
-      <div class="nav-links">
-      <a href="#/#about-me" data-nav>About</a>
-      <a href="#/#projects" data-nav>Projects</a>
-      <a href="#/#skills" data-nav>Skills</a>
-      <a href="#/#presentations" data-nav>Talks</a>
-      <a href="#/#education" data-nav>Education</a>
-      <a href="#/#contact" data-nav>Contact</a>
-      </div>
-      <a class="btn btn-small" id="nav-cv" href="#" target="_blank" rel="noopener" data-magnetic>CV ↗</a>
-      <button class="motion-toggle" id="motion-toggle" aria-label="Turn animations on or off" title="Animations on/off" data-magnetic><span class="mt-dot"></span><span class="mt-label">Motion</span></button>
-      <button class="theme-toggle" id="theme-toggle" aria-label="Toggle colour theme" data-magnetic>
-        <span class="sun"></span><span class="moon"></span>
-      </button>
-    </nav>
-  </header>
-
-  <main id="app"></main>
-
-  <footer class="footer" id="footer">
-    <div class="footer-inner">
-      <div>
-        <div class="footer-name" id="footer-name"></div>
-        <div class="footer-role" id="footer-role"></div>
-      </div>
-      <div class="footer-links" id="footer-links"></div>
-      <div class="footer-meta" id="footer-year"></div>
-    </div>
-  </footer>
-
-  <!-- lightbox -->
-  <div class="lightbox" id="lightbox" hidden>
-    <button class="lb-close" id="lb-close" aria-label="Close">×</button>
-    <button class="lb-prev" id="lb-prev" aria-label="Previous">‹</button>
-    <figure>
-      <img id="lb-img" alt="" />
-      <figcaption><span id="lb-cap"></span><span class="lb-count" id="lb-count"></span></figcaption>
-    </figure>
-    <button class="lb-next" id="lb-next" aria-label="Next">›</button>
-  </div>
-
-  <!-- libraries -->
-  <script src="js/vendor/gsap.min.js"></script>
-  <script src="js/vendor/ScrollTrigger.min.js"></script>
-  <script type="module">
-    // Three.js is ESM-only; expose it to the classic scripts below.
-    import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js";
-    window.THREE = THREE;
-    window.dispatchEvent(new Event("three-ready"));
-  </script>
-
-  <!-- app -->
-  <script src="js/data.js"></script>
-  <script src="js/curves.js"></script>
-  <script src="js/charts.js"></script>
-  <script src="js/fx.js"></script>
-  <script src="js/hero3d.js"></script>
-  <script src="js/main.js"></script>
+<div id="app"></div>
+<script src="https://cdn.jsdelivr.net/npm/three@0.149.0/build/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+<script charset="utf-8" src="js/data.js"></script>
+<script charset="utf-8" src="js/curves.js"></script>
+<script charset="utf-8" src="js/home-data.js"></script>
+<script charset="utf-8" src="js/home.js"></script>
+<script charset="utf-8" src="js/charts.js"></script>
+<script charset="utf-8" src="js/lightbox.js"></script>
+<script charset="utf-8" src="js/img-sizes.js"></script>
+<script charset="utf-8" src="js/case.js"></script>
+<script charset="utf-8" src="js/frames.js"></script>
+<script charset="utf-8" src="js/scene.js"></script>
+<script charset="utf-8" src="js/motion.js"></script>
 </body>
 </html>
