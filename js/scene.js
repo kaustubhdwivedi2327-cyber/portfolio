@@ -681,7 +681,7 @@
     if (off > .001 || pax || pay) camera.setViewOffset(cw, ch, -ch * .224 * off - pax, ch * .06 * off - pay, cw, ch);
     else if (mOff > .001) camera.setViewOffset(cw, ch, 0, -ch * .2 * mOff, cw, ch); else camera.clearViewOffset();
     const pl = want < .999 ? updatePlate(pS, Math.abs(p - pS) < 3e-4, now) : false, shown = !!pl;
-    plateOn = shown; if (stage.dataset.photo !== (shown ? "1" : "0")) stage.dataset.photo = shown ? "1" : "0";
+    plateOn = shown; const ps_ = pl === "stale" ? "stale" : shown ? "1" : "0"; if (stage.dataset.photo !== ps_) stage.dataset.photo = ps_;
     photoEase += ((shown ? 1 : 0) - photoEase) * Math.min(1, dt * 4);
     if (shown && photoEase > .98) photoEase = 1;
     if (liveEase < 0) liveEase = want;
