@@ -118,6 +118,7 @@ button { font: inherit; color: inherit; }
 .sky-photo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; mix-blend-mode: soft-light; }
 .sky-photo .img-day { opacity: calc(var(--day-op) * .55); } .sky-photo .img-night { opacity: calc(var(--night-op) * .5); }
 #wing { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -1; display: block; }
+.rt-layer { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -1; display: block; pointer-events: none; opacity: 0; }
 .flight-scrim { position: absolute; inset: 0; z-index: 0; pointer-events: none; background: var(--scrim-side); opacity: .85; }
 .chap { position: absolute; z-index: 2; left: 0; right: 0; top: 0; bottom: 0; display: flex; align-items: center; pointer-events: none; opacity: 0; will-change: opacity, transform; }
 .chap.c0 { opacity: 1; }
@@ -166,7 +167,7 @@ button { font: inherit; color: inherit; }
 .no-3d .chap { position: relative; opacity: 1 !important; transform: none !important; padding-block: 28px; }
 .no-3d .sky-photo img { mix-blend-mode: normal; }
 .no-3d .sky-photo .img-day { opacity: var(--day-op); } .no-3d .sky-photo .img-night { opacity: var(--night-op); }
-.no-3d #wing, .no-3d .pin, .no-3d .flight-hud { display: none; }
+.no-3d #wing, .no-3d .rt-layer, .no-3d .pin, .no-3d .flight-hud { display: none; }
 
 /* Ticker */
 .ticker { background: var(--bg); border-block: 1px solid var(--line); overflow: hidden; padding-block: 18px; -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); }
