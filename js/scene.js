@@ -8,7 +8,7 @@
   if (!flight || !canvas) return;
   const chaps = [...stage.querySelectorAll(".chap")], hud = [...stage.querySelectorAll(".flight-hud b")], hudBtns = [...stage.querySelectorAll(".hud-step")];
   const pinCan = document.getElementById("pin-can"), pinHit = document.getElementById("pin-hit");
-  if (pinCan) pinCan.classList.add("left");      // the can's label reads to the left, over open wing, clear of the rollers and track
+  if (pinCan) pinCan.dataset.side = "left";      // the can's label reads to the left, over open wing, clear of the rollers and track
   const mkPin = t => { const e = document.createElement("span"); e.className = "pin"; e.setAttribute("aria-hidden", "true"); e.innerHTML = `<span>${t}</span>`; stage.appendChild(e); return e; };
   const pinSlat = mkPin("Slat"), pinTrack = mkPin("Slat track"), pinSpar = mkPin("Front spar"), pinTank = mkPin("Fuel tank");
   const loadEl = document.getElementById("scene-load");
@@ -121,9 +121,10 @@
     vertexShader: "varying vec3 vN; varying vec3 vV; varying vec3 vW; void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mv = viewMatrix * w; vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }",
     fragmentShader: "uniform vec3 col; uniform float amt; uniform float sweep; uniform float band; varying vec3 vN; varying vec3 vV; varying vec3 vW; void main(){ float f = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 2.2); float d = vW.x - sweep; float b = band * exp(-d * d * 60.0); float a = (0.015 + 0.34 * f) * amt * step(d, 0.0) + b * 0.85; gl_FragColor = vec4(mix(col, vec3(1.0), b * 0.6) * (1.0 + b), a); }" });
   const wireMat = new T.LineBasicMaterial({ color: 0x7cc4ff, transparent: true, opacity: 0, depthWrite: false });
-  const canMat = new T.MeshStandardMaterial({ vertexColors: true, metalness: .2, roughness: .45, emissive: 0x0b0b0b });
-  const trackMat = new T.MeshStandardMaterial({ color: 0xa9b3c2, metalness: .9, roughness: .22 });
-  const rollerMat = new T.MeshStandardMaterial({ color: 0x2b3240, metalness: .7, roughness: .35 });
+  // the can as printed (as-built LPBF AlSi10Mg), a machined titanium track, ground steel rollers
+  const canMat = new T.MeshStandardMaterial({ color: 0xc8ccd0, metalness: .45, roughness: .5, emissive: 0x111214 });
+  const trackMat = new T.MeshStandardMaterial({ color: 0x9a9b9d, metalness: .85, roughness: .32 });
+  const rollerMat = new T.MeshStandardMaterial({ color: 0xc9cbcf, metalness: .7, roughness: .3, emissive: 0x0c0d0e });
   const sparMat = new T.MeshBasicMaterial({ color: 0xdfe9f6, transparent: true, opacity: 0, side: T.DoubleSide, depthWrite: false });
   const sparLine = new T.LineBasicMaterial({ color: 0x1e6fd9, transparent: true, opacity: 0, depthWrite: false });
   const logoMat = new T.MeshStandardMaterial({ color: 0xe8621f, roughness: .45, metalness: .1, side: T.DoubleSide, clippingPlanes: [scan] });
@@ -224,7 +225,10 @@
     sideR.add(moving); sideL.add(movingL);
     const sI = new T.Mesh(gSi, slatMat); sI.castShadow = sI.receiveShadow = true; moving.add(sI); movingL.add(sI.clone());
     slatMid = new T.Vector3(); gSi.computeBoundingBox(); gSi.boundingBox.getCenter(slatMid);
-    const shape = new T.Shape(); shape.moveTo(-.022, -.045); shape.lineTo(.022, -.045); shape.lineTo(.022, .045); shape.lineTo(-.022, .045); shape.closePath();
+    // I-section: 90 mm deep in the plane the track bends in (shape x), 45 mm flanges, 10 mm flanges and 9 mm web
+    const shape = new T.Shape(), D2 = .045, F2 = .0225, TF = .01, TW2 = .0045;
+    [[-D2, -F2], [-D2, F2], [-D2 + TF, F2], [-D2 + TF, TW2], [D2 - TF, TW2], [D2 - TF, F2], [D2, F2], [D2, -F2], [D2 - TF, -F2], [D2 - TF, -TW2], [-D2 + TF, -TW2], [-D2 + TF, -F2]]
+      .forEach(([x, y], i) => i ? shape.lineTo(x, y) : shape.moveTo(x, y)); shape.closePath();
     const up = new T.Vector3(0, 1, 0), aft = new T.Vector3(1, 0, 0);
     mech.stations.forEach((st, k) => {
       const A = new T.Vector3(...st.attach), pts = [];
@@ -232,8 +236,8 @@
       const tr = new T.Mesh(new T.ExtrudeGeometry(shape, { steps: 90, bevelEnabled: false, extrudePath: new T.CatmullRomCurve3(pts) }), trackMat);
       tr.castShadow = true; moving.add(tr); movingL.add(tr.clone());
       if (k === 1) trackMid = pts[Math.round(pts.length * .18)].clone();
-      st.rollers.forEach(r => { for (const off of [-.07, .07]) {
-        const rl = new T.Mesh(new T.CylinderGeometry(.04, .04, .06, 18), rollerMat);
+      st.rollers.forEach(r => { for (const off of [-.087, .087]) {          // on the upper and lower flanges
+        const rl = new T.Mesh(new T.CylinderGeometry(.04, .04, .044, 24), rollerMat);
         rl.position.set(r[0], r[1] + off, r[2]); rl.quaternion.setFromUnitVectors(up, sn); sideR.add(rl); sideL.add(rl.clone()); } });
       // the can: open end on the spar, facing the slat; its arched body runs aft into the tank and bends the same way
       // the track bends, so the track enters through the open end and slides along the arch towards the closed end
@@ -269,6 +273,7 @@
       const door = new T.LineLoop(new T.BufferGeometry().setFromPoints(v), doorMat); sideR.add(door); sideL.add(door.clone());
     }
     const E = meta.engine, fan = new T.Mesh(new T.CircleGeometry(E.fan_r, 48), fanMat);
+    plateU.fC0.value.set(E.centre[0] + .55, E.centre[1], E.centre[2]); plateU.fC1.value.set(E.centre[0] + .55, E.centre[1], -E.centre[2]); plateU.fR.value = E.fan_r;
     fan.position.set(E.centre[0] + .55, E.centre[1], E.centre[2]); fan.rotation.y = -Math.PI / 2;
     const spin = new T.Mesh(new T.ConeGeometry(.42, .9, 32), new T.MeshStandardMaterial({ color: 0xdfe4ea, metalness: .6, roughness: .25, clippingPlanes: [scan] }));
     spin.position.set(E.centre[0] + .2, E.centre[1], E.centre[2]); spin.rotation.z = Math.PI / 2;
@@ -465,46 +470,29 @@
       tx.ph = upload(tx, bmps[k], () => { tx.up = true; }); up++; upT = now;
     }
   }
-  // spinning fans: the fan regions re-rendered at six blade angles, cycled while the reader is still
-  const fanCrops = new Map();                     // frame index -> "loading" | "none" | [{ box, tx: [6 textures] }]
-  function loadFans(k) {
-    const f = FR[k]; if (!f || !f.fan || fanCrops.has(k)) return;
-    fanCrops.set(k, "loading");
-    Promise.all(f.fan.map(([e, x0, y0, x1, y1]) => Promise.all([0, 1, 2, 3, 4, 5].map(ph =>
-      fetch(RS + "fan/" + f.n + "_e" + e + "_k" + ph + ".webp").then(r => r.ok ? r.blob() : Promise.reject(r.status)).then(b => createImageBitmap(b, straight)).then(texOf)))
-      .then(tx => ({ box: new T.Vector4(x0, y0, x1, y1), tx }))))
-      .then(list => { fanCrops.set(k, list); for (const [j, v] of fanCrops) if (Math.abs(j - k) > 8) { if (Array.isArray(v)) v.forEach(o => o.tx.forEach(t => t.dispose())); fanCrops.delete(j); } },
-            () => fanCrops.set(k, "none"));
-  }
-  function fanPhase(a, b, rest, now) {         // blade phase to show, or -1 for the frame's own
-    if (!rest || !FR[a].fan || (b >= 0 && !FR[b].fan)) return -1;
-    loadFans(a); if (b >= 0) loadFans(b);
-    if (!Array.isArray(fanCrops.get(a)) || (b >= 0 && !Array.isArray(fanCrops.get(b)))) return -1;
-    return Math.floor(now / 1000 * 24) % 6;
-  }
+  // spinning fans: turned in the plate shader (spinFan below), from each frame's own photo
   // the plate: one full-screen pass. Each pixel's 3D point comes from the live aircraft's depth (drawn depth-only for
   // this camera) or, where there is no aircraft, is a direction (sky). Both are projected into the cameras of the two
   // frames on screen and looked up there: sky from the photo with the aircraft hole filled from the sky plate, aircraft
-  // from the photo (with the fan crops) through its matte. At a frame's own camera this is the photo exactly; between
+  // from the photo through its matte, its fan faces turned about their axes. At a frame's own camera this is the photo exactly; between
   // frames the picture moves like the live model
-  const NOBOX = new T.Vector4(-1, -1, -1, -1);
   const plateU = { pA: { value: blank }, mA: { value: blank }, gA: { value: blank }, pB: { value: blank }, mB: { value: blank }, gB: { value: blank },
-    fA0: { value: blank }, fA1: { value: blank }, fB0: { value: blank }, fB1: { value: blank },
-    bA0: { value: NOBOX }, bA1: { value: NOBOX }, bB0: { value: NOBOX }, bB1: { value: NOBOX }, dTex: { value: blank },
+    dTex: { value: blank }, fC0: { value: new T.Vector3() }, fC1: { value: new T.Vector3() }, fN: { value: new T.Vector3(1, 0, 0) }, fR: { value: 0 }, fPhi: { value: 0 },
     t: { value: 0 }, hasB: { value: 0 }, res: { value: new T.Vector2(1, 1) }, camPos: { value: new T.Vector3() },
     invVP: { value: new T.Matrix4() }, VPa: { value: new T.Matrix4() }, VPb: { value: new T.Matrix4() }, hasD: { value: 0 }, dist: { value: 50 }, ghost: { value: 0 } };
   const plateMat = new T.ShaderMaterial({ uniforms: plateU, depthTest: false, depthWrite: false,
     vertexShader: "void main(){ gl_Position = vec4(position.xy, 0.0, 1.0); }",
     fragmentShader: [
-      "uniform sampler2D pA, mA, gA, pB, mB, gB, fA0, fA1, fB0, fB1, dTex; uniform vec4 bA0, bA1, bB0, bB1;",
+      "uniform sampler2D pA, mA, gA, pB, mB, gB, dTex; uniform vec3 fC0, fC1, fN; uniform float fR, fPhi;",
       "uniform float t, hasB, hasD, dist, ghost; uniform vec2 res; uniform vec3 camPos; uniform mat4 invVP, VPa, VPb;",
       "const vec2 RP = vec2(" + RW + ".0, " + RH + ".0);",
       "vec2 toRef(mat4 VP, vec4 X) { vec4 c = VP * X; vec2 n = c.xy / c.w; return vec2((n.x * 0.5 + 0.5) * RP.x, (0.5 - n.y * 0.5) * RP.y); }",
       "vec3 world(vec2 ndc, float d) { vec4 w = invVP * vec4(ndc, d * 2.0 - 1.0, 1.0); return w.xyz / w.w; }",
-      "vec4 fan(sampler2D ft, vec4 b, vec2 rp) { if (b.x < 0.0 || rp.x < b.x || rp.y < b.y || rp.x > b.z || rp.y > b.w) return vec4(0.0); return texture2D(ft, (rp - b.xy) / (b.zw - b.xy)); }",
-      "vec3 photo(sampler2D P, sampler2D F0, sampler2D F1, vec4 b0, vec4 b1, vec2 rp) {",
-      "  vec3 c = texture2D(P, rp / RP).rgb; vec4 f = fan(F0, b0, rp); c = mix(c, f.rgb, f.a); f = fan(F1, b1, rp); return mix(c, f.rgb, f.a); }",
-      "vec3 frame(mat4 VP, sampler2D P, sampler2D M, sampler2D G, sampler2D F0, sampler2D F1, vec4 b0, vec4 b1, vec3 dir, vec3 X, float ac) {",
+      // a point on a fan's blade ring, turned back about the fan axis by the current phase (the hub and the inlet lip stay)
+      "vec3 spinFan(vec3 X, vec3 C) { vec3 d = X - C; float h = dot(d, fN); vec3 q = d - fN * h; float r = length(q);",
+      "  if (fR <= 0.0 || abs(h) > 0.15 || r > fR * 0.96 || r < fR * 0.2) return X;",
+      "  return C + fN * h + q * cos(fPhi) + cross(fN, q) * sin(fPhi); }",
+      "vec3 frame(mat4 VP, sampler2D P, sampler2D M, sampler2D G, vec3 dir, vec3 X, float ac) {",
       // the sky behind: the photo, or the sky plate where the photo shows aircraft
       "  vec2 us = toRef(VP, vec4(dir, 0.0)) / RP;",
       "  vec3 sky = mix(texture2D(P, us).rgb, texture2D(G, us).rgb, smoothstep(0.0, 0.05, texture2D(M, us).a));",
@@ -512,7 +500,7 @@
       // the aircraft premultiplied (the photo less the sky seen through it) over that sky: at the frame's own camera
       // this is the photo exactly, see-through x-ray parts included
       "  vec2 ra = toRef(VP, vec4(X, 1.0)), ua = ra / RP; float m = texture2D(M, ua).a;",
-      "  vec3 air = photo(P, F0, F1, b0, b1, ra) - (1.0 - m) * texture2D(G, ua).rgb;",
+      "  vec3 air = texture2D(P, ua).rgb - (1.0 - m) * texture2D(G, ua).rgb;",
       "  return mix(sky, air + (1.0 - m) * sky, smoothstep(0.0, 0.05, m)); }",
       // the nearest aircraft depth on rings of 2 to 22 reference pixels
       "float nearDepth(vec2 uv, float s) {",
@@ -527,8 +515,9 @@
       "  if (d >= 1.0 && (mS > 0.0 || (hasB > 0.5 && texture2D(mB, toRef(VPb, vec4(dir, 0.0)) / RP).a > 0.0))) d = nearDepth(uv, res.y / RP.y);",
       "  float ac = d < 1.0 ? 1.0 : 0.0; vec3 X = world(ndc, min(d, 0.9999999));",
       "  if (hasD < 0.5 || (ghost > 0.5 && ac < 0.5 && mS > 0.0)) { ac = 1.0; X = camPos + dir * dist; }   // aircraft not loaded yet, or the x-ray's see-through ghost: one plane at the subject's distance",
-      "  vec3 c = frame(VPa, pA, mA, gA, fA0, fA1, bA0, bA1, dir, X, ac);",
-      "  if (hasB > 0.5) c = mix(c, frame(VPb, pB, mB, gB, fB0, fB1, bB0, bB1, dir, X, ac), t);",
+      "  if (ac > 0.5) X = spinFan(spinFan(X, fC0), fC1);",
+      "  vec3 c = frame(VPa, pA, mA, gA, dir, X, ac);",
+      "  if (hasB > 0.5) c = mix(c, frame(VPb, pB, mB, gB, dir, X, ac), t);",
       "  gl_FragColor = vec4(c, 1.0); }"].join("\n") });
   const plateScene = new T.Scene(), plateQuad = new T.Mesh(new T.PlaneGeometry(2, 2), plateMat); plateQuad.frustumCulled = false; plateScene.add(plateQuad);
   // compiled and drawn once (empty) while the page is still loading, so the first real frame does not stall on it
@@ -546,7 +535,22 @@
     tmpP.copy(keepP); tmpT.copy(keepT); refVPs.set(k, m); return m;
   };
   // the live aircraft's depth for this camera: solid parts only, cut by the x-ray plane like the drawn ones
-  let depthRT = null, depthList = null;
+  let depthRT = null, depthList = null, xrNow = 0;
+  // the x-ray window, as rendered: inside a cone from the camera to the subject (a cylinder near the camera), up to a
+  // depth past the subject; w scales the width, d is the depth past the subject
+  const coneU = { cC: { value: new T.Vector3() }, cT: { value: new T.Vector3() }, cOpen: { value: 0 } };
+  const coneTwin = (w, d) => {
+    const m = new T.MeshBasicMaterial({ colorWrite: false, side: T.DoubleSide });
+    m.onBeforeCompile = sh => {
+      Object.assign(sh.uniforms, coneU, { cW: { value: w }, cD: { value: d } });
+      sh.vertexShader = sh.vertexShader.replace("#include <common>", "#include <common>\nvarying vec3 vWp;")
+        .replace("#include <project_vertex>", "#include <project_vertex>\nvWp = (modelMatrix * vec4(transformed, 1.0)).xyz;");
+      sh.fragmentShader = sh.fragmentShader.replace("#include <common>", "#include <common>\nvarying vec3 vWp; uniform vec3 cC, cT; uniform float cOpen, cW, cD;")
+        .replace("void main() {", "void main() {\n  { vec3 d = vWp - cC, ct = cT - cC; float tT = length(ct); vec3 ax = ct / tT; float t = dot(d, ax); float r = length(d - ax * t);\n" +
+          "    if (r < max(t * 0.2, 1.25) * cOpen * cW && t < tT + cD && t > 0.05) discard; }");
+    };
+    m.customProgramCacheKey = () => "xcone" + w + "_" + d; return m;
+  };
   function depthPass() {
     plateU.hasD.value = ready ? 1 : 0; if (!ready) return;
     renderer.getDrawingBufferSize(bufSize);
@@ -558,10 +562,12 @@
     if (!depthList) {
       const twins = new Map(); depthList = [];
       scene.traverse(o => { if (!(o.layers.mask & 1) || !(o.isMesh || o.isLine || o.isPoints)) return;
-        const m = o.material, solid = o.isMesh && m && m !== sparMat;
-        // two depth-only materials (cut by the x-ray plane or not), both sides: the nearest surface wins either way
-        const ck = m && m.clippingPlanes ? "clip" : "solid";
-        let tw = null; if (solid) { tw = twins.get(ck); if (!tw) { tw = new T.MeshBasicMaterial({ colorWrite: false, side: T.DoubleSide, clippingPlanes: m.clippingPlanes || null }); twins.set(ck, tw); } }
+        const m = o.material, solid = o.isMesh && m;
+        // depth-only, both sides (the nearest surface wins): the skin cut by the x-ray window, the tank wall by its
+        // narrower, deeper window, the mechanism whole
+        const ck = !solid ? "" : m === sparMat ? "deep" : m.clippingPlanes ? "skin" : "whole";       // (the slats are not cut: see-through in the renders)
+        let tw = null;
+        if (solid) { tw = twins.get(ck); if (!tw) { tw = ck === "whole" ? new T.MeshBasicMaterial({ colorWrite: false, side: T.DoubleSide }) : ck === "deep" ? coneTwin(.8, 1.6) : coneTwin(1, .45); twins.set(ck, tw); } }
         depthList.push([o, m, tw, true]); });
     }
     for (const e of depthList) if (e[2]) e[0].material = e[2]; else { e[3] = e[0].visible; e[0].visible = false; }
@@ -570,13 +576,6 @@
     camera.layers.enableAll(); renderer.setRenderTarget(null);
   }
   const bufSize = new T.Vector2();
-  function setFans(pre, k, ph) {
-    const list = ph >= 0 ? fanCrops.get(k) : null;
-    for (const e of [0, 1]) {
-      const o = Array.isArray(list) && list[e];
-      plateU["f" + pre + e].value = o ? o.tx[ph] : blank; plateU["b" + pre + e].value = o ? o.box : NOBOX;
-    }
-  }
   function updatePlate(p, rest, now) {
     // the nearest decoded frame at or before the reader and the nearest after, blended by position (frames may be
     // skipped while scrolling fast)
@@ -595,12 +594,10 @@
     if (window.__kdForce && onGPU(a - window.__kdForce)) { a -= window.__kdForce; b = -1; tt = 0; }       // diagnostics: re-project a frame further back
     lastPair = [a, b, tt];
     if (window.__kdRec) window.__kdRec.push([now, p, b >= 0 ? lerp(FR[a].p, FR[b].p, tt) : FR[a].p, res === true ? 1 : 0, b >= 0 ? b - a : 0]);   // diagnostics: shown vs wanted position
-    const ph = res === true ? fanPhase(a, b, rest, now) : -1;
     const A = texFor(a), Bx = b >= 0 ? texFor(b) : A, full = k => hi[k] && hi[k].up ? hi[k].tex : texs[k].ph;
     plateU.pA.value = full(a); plateU.mA.value = A.ph; plateU.gA.value = A.g;          // the matte is the scrolling copy's alpha
     plateU.pB.value = b >= 0 ? full(b) : plateU.pA.value; plateU.mB.value = Bx.ph; plateU.gB.value = Bx.g;
     plateU.t.value = tt; plateU.hasB.value = b >= 0 ? 1 : 0;
-    setFans("A", a, ph); setFans("B", b >= 0 ? b : a, b >= 0 ? ph : -1);
     renderer.getDrawingBufferSize(bufSize); plateU.res.value.copy(bufSize);
     camera.updateMatrixWorld(); plateU.invVP.value.multiplyMatrices(camera.matrixWorld, camera.projectionMatrixInverse); plateU.camPos.value.setFromMatrixPosition(camera.matrixWorld);
     plateU.dist.value = tmpP.distanceTo(tmpT); plateU.VPa.value = refVP(a); plateU.VPb.value = refVP(b >= 0 ? b : a);
@@ -662,8 +659,9 @@
   let pending = [];
   const place = (el, v, show) => {
     if (!el) return; proj.copy(v).project(camera);
-    const ok = show && proj.z < 1; setS(el, "opacity", ok ? "1" : "0");
-    if (ok) pending.push({ el, x: (proj.x + 1) / 2 * sW, y: (1 - proj.y) / 2 * sH });
+    const x = (proj.x + 1) / 2 * sW, y = (1 - proj.y) / 2 * sH;
+    const ok = show && proj.z < 1 && x > 6 && x < sW - 6 && y > 0 && y < sH; setS(el, "opacity", ok ? "1" : "0");   // not for points off the stage
+    if (ok) pending.push({ el, x, y });
   };
   const flushPins = () => {        // nudge labels apart vertically so none overlap
     pending.sort((a, b) => a.y - b.y);
@@ -671,7 +669,13 @@
       const a = pending[j], b = pending[i];
       if (Math.abs(a.x - b.x) < 190 && b.y - a.y < 28) b.y = a.y + 28;
     }
-    for (const p of pending) setS(p.el, "transform", `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px)`);
+    for (const p of pending) {
+      setS(p.el, "transform", `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px)`);
+      // the preferred side, unless the label would run off the stage there
+      const w = p.el._w || (p.el._w = (p.el.firstElementChild ? p.el.firstElementChild.offsetWidth : 120) + 22);
+      const left = p.el.dataset.side === "left" ? p.x - w >= 8 || p.x + w > sW - 8 : p.x + w > sW - 8 && p.x - w >= 8;
+      if (p.el._left !== left) { p.el._left = left; p.el.classList.toggle("left", left); }
+    }
     pending = [];
   };
   const win = (p, a, b, f = .045) => Math.min(smooth(p, a, a + f), 1 - smooth(p, b - f, b));
@@ -701,7 +705,7 @@
 
     if (ready) {
       // chapter 1: x-ray of the inboard leading edge
-      const xr = smooth(pS, .24, .32) * (1 - smooth(pS, .52, .6));
+      const xr = smooth(pS, .24, .32) * (1 - smooth(pS, .52, .6)); xrNow = xr;
       // a scan plane sweeps aft through the aircraft; ahead of it the skin is cut away to show the structure inside
       const sx = lerp(-1.5, 41, xr); scan.constant = -sx; plateU.ghost.value = xr > .001 ? 1 : 0;
       ghostMat.uniforms.amt.value = xr; ghostMat.uniforms.sweep.value = sx; ghostMat.uniforms.band.value = Math.sin(Math.PI * xr) * (xr < .999 ? 1 : 0); wireMat.opacity = .85 * xr;
@@ -764,7 +768,7 @@
     }
 
     // camera; mouse parallax only while the view is live (the photos are fixed frames)
-    camAt(pS);
+    camAt(pS); coneU.cC.value.copy(tmpP); coneU.cT.value.copy(tmpT); coneU.cOpen.value = xrNow;     // the x-ray window, as rendered
     const want = photoOK() ? 0 : 1; feed(pS, Math.abs(p - pS) < 3e-4); if (want || liveEase > 0) loadSky();
     smx += (mx - smx) * Math.min(1, dt * 3); smy += (my - smy) * Math.min(1, dt * 3);
     const D = tmpP.distanceTo(tmpT), d = D * .02 * want * want;
@@ -780,6 +784,7 @@
     // close-ups move the subject right and up by fixed fractions of the height (the rendered frames have the same shift baked in)
     if (off > .001) camera.setViewOffset(cw, ch, -ch * .224 * off, ch * .06 * off, cw, ch);
     else if (mOff > .001) camera.setViewOffset(cw, ch, 0, -ch * .2 * mOff, cw, ch); else camera.clearViewOffset();
+    plateU.fPhi.value = (now / 1000 * .9) % (Math.PI * 2);                  // the fans turn at ~50 deg/s
     const pl = want < .999 ? updatePlate(pS, Math.abs(p - pS) < 3e-4, now) : false, shown = !!pl;
     plateOn = shown; const ps_ = pl === "stale" ? "stale" : shown ? "1" : "0"; if (stage.dataset.photo !== ps_) stage.dataset.photo = ps_;
     photoEase += ((shown ? 1 : 0) - photoEase) * Math.min(1, dt * 4);
