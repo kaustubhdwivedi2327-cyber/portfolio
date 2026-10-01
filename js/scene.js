@@ -353,8 +353,8 @@
   // files stream in nearest-first (six frames at a time); frames near the reader are decoded (four at a time, up to AHEAD
   // in the scroll direction and BEHIND the other way, every other one first) and those further than DROP are released
   const AHEAD = 10, BEHIND = 3, DROP = 12;
-  // fixed limits: files fetched only this far from the reader, and at most this many frames decoded / on the GPU
-  const FAHEAD = 400, FBEHIND = 150, FORGET = 500, CAP_DEC = 24, CAP_GPU = 20;
+  // fixed limits: at most this many frames decoded / on the GPU
+  const CAP_DEC = 24, CAP_GPU = 20;
   const DECODE_ORDER = [0, 1, 2, 4, 6, 8, 10, 3, 5, 7, 9];
   // the frames just beyond the live x-ray layer's two ends (js/rt.js): ready while it covers the x-ray, so leaving it never waits
   const EXITS = (() => {
@@ -412,11 +412,10 @@
     "const files = new Map();",
     "const get = (u, pr) => fetch(u, { priority: pr || 'low' }).then(r => r.ok ? r.blob() : null, () => null);",
     "self.onmessage = async e => { const d = e.data;",
-    "  if (d.cmd === 'fetch') { const [ph, g] = await Promise.all(d.urls.map(get)); if (ph) files.set(d.k, { ph, g }); postMessage({ cmd: 'fetched', k: d.k, ok: !!ph }); }",
+    "  if (d.cmd === 'fetch') { const [ph, g] = await Promise.all(d.urls.map(u => get(u))); if (ph) files.set(d.k, { ph, g }); postMessage({ cmd: 'fetched', k: d.k, ok: !!ph }); }",
     "  else if (d.cmd === 'decode') { const f = files.get(d.k); if (!f) { postMessage({ cmd: 'decoded', k: d.k }); return; }",
     "    try { const [b, g] = await Promise.all([createImageBitmap(f.ph, { premultiplyAlpha: 'none' }), f.g ? createImageBitmap(f.g) : null]);",
     "      postMessage({ cmd: 'decoded', k: d.k, b, g }, g ? [b, g] : [b]); } catch (err) { postMessage({ cmd: 'decoded', k: d.k }); } }",
-    "  else if (d.cmd === 'forget') files.delete(d.k);",
     "  else if (d.cmd === 'full') { const b = await get(d.url, 'high'); let bm = null; try { bm = b ? await createImageBitmap(b) : null; } catch (err) {}",
     "    postMessage({ cmd: 'full', k: d.k, bm }, bm ? [bm] : []); } };"].join("\n");
   let worker = null;
@@ -448,9 +447,9 @@
     pinned.clear();
     const exits = lite ? (dir > 0 ? [...EXITS.hi, ...EXITS.lo] : [...EXITS.lo, ...EXITS.hi]) : [];
     for (const k of exits) { pinned.add(k); if (fetching < 6 && !st[k]) fetchK(k); }
-    for (let r = 0; r <= FAHEAD && fetching < 6 && unfetched > 0; r++) for (let side = 0; side < 2; side++) {
+    for (let r = 0; r < FR.length && fetching < 6 && unfetched > 0; r++) for (let side = 0; side < 2; side++) {
       const k = c + (side ? -r : r) * dir;
-      if (fetching >= 6 || (side && r > FBEHIND) || k < 0 || k >= FR.length || st[k]) continue;
+      if (fetching >= 6 || k < 0 || k >= FR.length || st[k]) continue;
       fetchK(k);
     }
     const toDecode = lite ? exits.map(k => [k]) : DECODE_ORDER.map(r0 => r0 <= BEHIND ? [c + r0 * stride * dir, c - r0 * dir] : [c + r0 * stride * dir]);
@@ -475,10 +474,6 @@
       ks.sort((a, b) => Math.abs(b - c) - Math.abs(a - c));
       for (const k of ks) { if (nb <= CAP_DEC && nt <= CAP_GPU) break; if (bmps[k]) nb--; if (texs[k]) nt--; release(k); if (st[k] > 2) st[k] = 2; }
     }
-    // files far behind the reader are forgotten (fetched again, from the browser's cache, if the reader comes back)
-    for (let k = 0; k < FR.length; k++) if (st[k] === 2 && Math.abs(k - c) > FORGET && !bmps[k]) {
-      st[k] = 0; unfetched++; if (worker) worker.postMessage({ cmd: "forget", k }); else blobs[k] = null;
-    }
     // at rest: the full-size photos of the frames on screen (fetched, decoded, then uploaded like the rest)
     const onScreen = lastPair ? [lastPair[0], lastPair[1]].filter(k => k >= 0) : [];
     if (rest) for (const k of onScreen) if (!hi[k] && has(k)) {
@@ -489,7 +484,7 @@
     for (let k = 0; k < FR.length; k++) if (hi[k] && Math.abs(k - c) > 3 && !onScreen.includes(k)) dropHi(k);
     // upload ahead: one frame per screen update (a scrolling copy is ~3 ms, a full-size photo ~7 ms), nearest first
     let up = 0;
-    if (upJob) { stripStep(); up++; }                 // a picture part-way up: its next strip
+    if (upJob) { stripStep(); up++; if (upJob && !lite && !onGPU(c) && !onGPU(c + dir)) stripStep(); }   // a picture part-way up: its next strip (two when the reader has none and the live layer is off)
     if (rest) for (const k of onScreen) { const h = hi[k]; if (up < 1 && h && h.st === 2 && !h.tex && onGPU(k)) { h.tex = upload(h, h.bm, () => { h.up = true; }); up++; } }
     // ahead-of-need uploads are paced (~30 a second) so a fast scroll does not upload on every refresh; the frames the
     // reader is at go up straight away
