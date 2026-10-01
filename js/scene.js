@@ -12,7 +12,7 @@
   const mkPin = t => { const e = document.createElement("span"); e.className = "pin"; e.setAttribute("aria-hidden", "true"); e.innerHTML = `<span>${t}</span>`; stage.appendChild(e); return e; };
   const pinSlat = mkPin("Slat"), pinTrack = mkPin("Slat track"), pinSpar = mkPin("Front spar"), pinTank = mkPin("Fuel tank");
   const loadEl = document.getElementById("scene-load");
-  const RT = /[?&]nolive/.test(location.search) ? null : window.KDRT || null;    // the live x-ray layer (js/rt.js): its own canvas over this one (?nolive: off)
+  const RT = /[?&]nolive(&|$)/.test(location.search) ? null : window.KDRT || null;    // the live x-ray layer (js/rt.js): its own canvas over this one (?nolive: off)
   if (RT) RT.attach(stage, canvas);
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches, small = innerWidth < 760;
   const glOK = (() => { try { const c = document.createElement("canvas"); return !!(c.getContext("webgl2") || c.getContext("webgl")); } catch (e) { return false; } })();
@@ -336,7 +336,7 @@
   const measureC0 = () => { if (!c0Wrap) return; const nh = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--nav-h")) || 56; c0Over = Math.max(0, c0Wrap.offsetHeight + nh - stage.clientHeight); };
   if (c0Wrap) { new ResizeObserver(measureC0).observe(c0Wrap); new ResizeObserver(measureC0).observe(stage); }
   let visible = true;
-  new IntersectionObserver(([e]) => { visible = e.isIntersecting; if (visible) { measure(); tick(); } }, { rootMargin: "100px" }).observe(flight);
+  new IntersectionObserver(([e]) => { visible = e.isIntersecting; if (visible) { measure(); tick(); } else if (window.KDRT) { window.KDRT.still = false; window.KDRT.pause(); } }, { rootMargin: "100px" }).observe(flight);
   let mx = 0, my = 0, smx = 0, smy = 0;
   stage.addEventListener("pointermove", e => { mx = e.clientX / innerWidth - .5; my = e.clientY / innerHeight - .5; });
 
@@ -352,10 +352,21 @@
   const frameAt = p => { let lo = 0, hi = FR.length - 1; while (hi - lo > 1) { const m = (lo + hi) >> 1; if (FR[m].p <= p) lo = m; else hi = m; } return lo; };
   // files stream in nearest-first (six frames at a time); frames near the reader are decoded (four at a time, up to AHEAD
   // in the scroll direction and BEHIND the other way, every other one first) and those further than DROP are released
-  const AHEAD = 14, BEHIND = 4, DROP = 26;
-  const DECODE_ORDER = [0, 1, 2, 4, 6, 8, 10, 12, 14, 3, 5, 7, 9, 11, 13];
+  const AHEAD = 10, BEHIND = 3, DROP = 12;
+  // fixed limits: files fetched only this far from the reader, and at most this many frames decoded / on the GPU
+  const FAHEAD = 400, FBEHIND = 150, FORGET = 500, CAP_DEC = 24, CAP_GPU = 20;
+  const DECODE_ORDER = [0, 1, 2, 4, 6, 8, 10, 3, 5, 7, 9];
+  // the frames just beyond the live x-ray layer's two ends (js/rt.js): ready while it covers the x-ray, so leaving it never waits
+  const EXITS = (() => {
+    if (!FR.length) return { lo: [], hi: [] };
+    const lo = frameAt(.2), hi = frameAt(.6), hi2 = frameAt(.63), a = [], b = [];
+    for (let k = Math.max(0, lo - 3); k <= Math.min(FR.length - 1, lo + 3); k++) a.push(k);
+    for (let i = 0; i < 8; i++) b.push(Math.round(hi + (hi2 - hi) * i / 7));
+    return { lo: a, hi: [...new Set(b)] };
+  })();
+  const pinned = new Set();             // frames kept whatever the distance (the exits, while the live layer shows)
   let fetching = 0, decoding = 0, lastC = 0, dir = 1, vel = 0, velT = 0, upT = 0, unfetched = FR.length;
-  const get = url => fetch(url).then(r => r.ok ? r.blob() : null, () => null);
+  const get = (url, pr) => fetch(url, { priority: pr || "low" }).then(r => r.ok ? r.blob() : null, () => null);
   const bitmap = (b, o) => b ? createImageBitmap(b, o).catch(() => null) : null;
   const straight = { premultiplyAlpha: "none" };
   const idle = window.requestIdleCallback ? f => requestIdleCallback(f, { timeout: 1500 }) : f => setTimeout(f, 200);
@@ -395,16 +406,18 @@
     if (texs[k]) { for (const t of [texs[k].ph, texs[k].g]) if (t && t !== blank) t.dispose(); texs[k] = null; }
   };
   const texFor = k => texs[k];
+  window.__kdMem = () => ({ decoded: bmps.filter(Boolean).length, gpu: texs.filter(Boolean).length, full: hi.filter(h => h && h.tex).length, fetched: st.filter(v => v >= 2).length });   // diagnostics
   // a worker fetches and decodes; the page only sends requests and receives decoded bitmaps
   const WSRC = [
     "const files = new Map();",
-    "const get = u => fetch(u).then(r => r.ok ? r.blob() : null, () => null);",
+    "const get = (u, pr) => fetch(u, { priority: pr || 'low' }).then(r => r.ok ? r.blob() : null, () => null);",
     "self.onmessage = async e => { const d = e.data;",
     "  if (d.cmd === 'fetch') { const [ph, g] = await Promise.all(d.urls.map(get)); if (ph) files.set(d.k, { ph, g }); postMessage({ cmd: 'fetched', k: d.k, ok: !!ph }); }",
     "  else if (d.cmd === 'decode') { const f = files.get(d.k); if (!f) { postMessage({ cmd: 'decoded', k: d.k }); return; }",
     "    try { const [b, g] = await Promise.all([createImageBitmap(f.ph, { premultiplyAlpha: 'none' }), f.g ? createImageBitmap(f.g) : null]);",
     "      postMessage({ cmd: 'decoded', k: d.k, b, g }, g ? [b, g] : [b]); } catch (err) { postMessage({ cmd: 'decoded', k: d.k }); } }",
-    "  else if (d.cmd === 'full') { const b = await get(d.url); let bm = null; try { bm = b ? await createImageBitmap(b) : null; } catch (err) {}",
+    "  else if (d.cmd === 'forget') files.delete(d.k);",
+    "  else if (d.cmd === 'full') { const b = await get(d.url, 'high'); let bm = null; try { bm = b ? await createImageBitmap(b) : null; } catch (err) {}",
     "    postMessage({ cmd: 'full', k: d.k, bm }, bm ? [bm] : []); } };"].join("\n");
   let worker = null;
   try { worker = new Worker(URL.createObjectURL(new Blob([WSRC], { type: "text/javascript" }))); } catch (e) { worker = null; }
@@ -415,7 +428,7 @@
       if (d.cmd === "fetched") { fetching--; st[k] = d.ok ? 2 : 5; }
       else if (d.cmd === "decoded") { decoding--;
         if (!d.b) { st[k] = 5; return; }
-        if (Math.abs(k - lastC) > DROP) { st[k] = 2; d.b.close(); if (d.g) d.g.close(); } else { bmps[k] = d.b; bgs[k] = d.g || null; st[k] = 4; } }
+        if (Math.abs(k - lastC) > DROP && !pinned.has(k)) { st[k] = 2; d.b.close(); if (d.g) d.g.close(); } else { bmps[k] = d.b; bgs[k] = d.g || null; st[k] = 4; } }
       else if (d.cmd === "full") { const h = hi[k]; if (!h || !d.bm) { if (h) h.st = 3; if (d.bm) d.bm.close(); return; } h.bm = d.bm; h.st = 2; } };
   }
   const dropHi = k => { const h = hi[k]; if (!h) return; if (upJob && upJob.key === h) upJob = null; if (h.tex) h.tex.dispose(); if (h.bm && h.bm.close) h.bm.close(); hi[k] = null; };
@@ -425,16 +438,23 @@
     vel += (Math.abs(c - lastC) / dtv - vel) * Math.min(1, dtv * 6);               // frames per second the reader is passing
     if (c !== lastC) { dir = c > lastC ? 1 : -1; lastC = c; }
     const stride = Math.max(1, Math.min(4, Math.round(vel / 50)));                     // ~one decoded frame per refresh when fast
-    for (let r = 0; r < FR.length && fetching < 6 && unfetched > 0; r++) for (let side = 0; side < 2; side++) {
-      const k = c + (side ? -r : r) * dir;
-      if (fetching >= 6 || k < 0 || k >= FR.length || st[k]) continue;
+    const fetchK = k => {
       fetching++; st[k] = 1; unfetched--;
-      if (worker) { worker.postMessage({ cmd: "fetch", k, urls: [abs(RS + "m/" + FR[k].n + ".webp"), abs(RS + "bg/" + FR[k].n + ".webp")] }); continue; }
+      if (worker) { worker.postMessage({ cmd: "fetch", k, urls: [abs(RS + "m/" + FR[k].n + ".webp"), abs(RS + "bg/" + FR[k].n + ".webp")] }); return; }
       Promise.all([get(RS + "m/" + FR[k].n + ".webp"), get(RS + "bg/" + FR[k].n + ".webp")])
         .then(([ph, g]) => { if (ph) { blobs[k] = { ph, g }; st[k] = 2; } else st[k] = 5; }).finally(() => { fetching--; });
+    };
+    // under the live layer: its exits (the one ahead first) are what must be ready; nothing under it is decoded
+    pinned.clear();
+    const exits = lite ? (dir > 0 ? [...EXITS.hi, ...EXITS.lo] : [...EXITS.lo, ...EXITS.hi]) : [];
+    for (const k of exits) { pinned.add(k); if (fetching < 6 && !st[k]) fetchK(k); }
+    for (let r = 0; r <= FAHEAD && fetching < 6 && unfetched > 0; r++) for (let side = 0; side < 2; side++) {
+      const k = c + (side ? -r : r) * dir;
+      if (fetching >= 6 || (side && r > FBEHIND) || k < 0 || k >= FR.length || st[k]) continue;
+      fetchK(k);
     }
-    for (const r0 of DECODE_ORDER) for (let side = 0; side < (r0 <= BEHIND ? 2 : 1); side++) {
-      const k = side ? c - r0 * dir : c + r0 * stride * dir;
+    const toDecode = lite ? exits.map(k => [k]) : DECODE_ORDER.map(r0 => r0 <= BEHIND ? [c + r0 * stride * dir, c - r0 * dir] : [c + r0 * stride * dir]);
+    for (const ks of toDecode) for (const k of ks) {
       if (decoding >= 4 || k < 0 || k >= FR.length || st[k] !== 2) continue;
       decoding++; st[k] = 3;
       if (worker) { worker.postMessage({ cmd: "decode", k }); continue; }
@@ -442,26 +462,43 @@
       Promise.all([bitmap(f.ph, straight), bitmap(f.g, {})])
         .then(([b, g]) => {
           if (!b) { st[k] = 5; return; }
-          if (Math.abs(k - lastC) > DROP) st[k] = 2;
+          if (Math.abs(k - lastC) > DROP && !pinned.has(k)) st[k] = 2;
           else { bmps[k] = b; bgs[k] = g; st[k] = 4; } })
         .finally(() => { decoding--; });
     }
-    for (let k = 0; k < FR.length; k++) if (bmps[k] && Math.abs(k - c) > DROP * stride && !(lastPair && (k === lastPair[0] || k === lastPair[1]))) { release(k); st[k] = 2; }
+    const keep = k => pinned.has(k) || (lastPair && (k === lastPair[0] || k === lastPair[1]));
+    for (let k = 0; k < FR.length; k++) if (bmps[k] && Math.abs(k - c) > DROP * stride && !keep(k)) { release(k); st[k] = 2; }
+    // the caps: however fast the reader goes, the frames furthest from them go first
+    let nb = 0, nt = 0; for (let k = 0; k < FR.length; k++) { if (bmps[k]) nb++; if (texs[k]) nt++; }
+    if (nb > CAP_DEC || nt > CAP_GPU) {
+      const ks = []; for (let k = 0; k < FR.length; k++) if ((bmps[k] || texs[k]) && !keep(k)) ks.push(k);
+      ks.sort((a, b) => Math.abs(b - c) - Math.abs(a - c));
+      for (const k of ks) { if (nb <= CAP_DEC && nt <= CAP_GPU) break; if (bmps[k]) nb--; if (texs[k]) nt--; release(k); if (st[k] > 2) st[k] = 2; }
+    }
+    // files far behind the reader are forgotten (fetched again, from the browser's cache, if the reader comes back)
+    for (let k = 0; k < FR.length; k++) if (st[k] === 2 && Math.abs(k - c) > FORGET && !bmps[k]) {
+      st[k] = 0; unfetched++; if (worker) worker.postMessage({ cmd: "forget", k }); else blobs[k] = null;
+    }
     // at rest: the full-size photos of the frames on screen (fetched, decoded, then uploaded like the rest)
     const onScreen = lastPair ? [lastPair[0], lastPair[1]].filter(k => k >= 0) : [];
     if (rest) for (const k of onScreen) if (!hi[k] && has(k)) {
       const h = hi[k] = { st: 1 };
       if (worker) { worker.postMessage({ cmd: "full", k, url: abs(FR[k].src) }); continue; }
-      get(FR[k].src).then(b => bitmap(b, {})).then(bm => { if (hi[k] !== h) return; if (bm) { h.bm = bm; h.st = 2; } else h.st = 3; });
+      get(FR[k].src, "high").then(b => bitmap(b, {})).then(bm => { if (hi[k] !== h) return; if (bm) { h.bm = bm; h.st = 2; } else h.st = 3; });
     }
     for (let k = 0; k < FR.length; k++) if (hi[k] && Math.abs(k - c) > 3 && !onScreen.includes(k)) dropHi(k);
     // upload ahead: one frame per screen update (a scrolling copy is ~3 ms, a full-size photo ~7 ms), nearest first
     let up = 0;
-    if (upJob) { stripStep(); up++; if (upJob && !lite && !onGPU(c) && !onGPU(c + dir)) stripStep(); }   // a picture part-way up: its next strip (two when the reader has none and the live layer is off)
+    if (upJob) { stripStep(); up++; }                 // a picture part-way up: its next strip
     if (rest) for (const k of onScreen) { const h = hi[k]; if (up < 1 && h && h.st === 2 && !h.tex && onGPU(k)) { h.tex = upload(h, h.bm, () => { h.up = true; }); up++; } }
     // ahead-of-need uploads are paced (~30 a second) so a fast scroll does not upload on every refresh; the frames the
     // reader is at go up straight away
-    if (lite === 2) return;             // (the live layer is showing: no frames go up ahead)
+    if (lite) {                         // (the live layer is showing: its exits go up, nothing else)
+      for (const k of exits) { if (up >= 1) break; if (has(k) && !texs[k]) {
+        const tx = texs[k] = { ph: null, g: bgs[k] ? texOf(bgs[k]) : blank, up: false }; if (tx.g !== blank) renderer.initTexture(tx.g);
+        tx.ph = upload(tx, bmps[k], () => { tx.up = true; }); up++; } }
+      return;
+    }
     let near = false;                   // is any frame near the reader already on the GPU?
     for (let k = Math.max(0, c - 12); k <= Math.min(FR.length - 1, c + 13) && !near; k++) near = onGPU(k) && Math.abs(FR[k].p - p) < .02;
     for (let r = 0; r <= 6; r++) for (let side = 0; side < 2; side++) {
@@ -692,7 +729,7 @@
     scrollTo({ top: flight.offsetTop + at * span, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
   });
   let pS = 0, last = performance.now(), raf = 0, slowFrames = 0, frames = 0;
-  let lastScrollP = -1, lastMove = 0, snapK = -1, atFrameT = 0, rtFullT = 0, rtOffT = -1e9;
+  let lastScrollP = -1, lastMove = 0, snapK = -1, atFrameT = 0, rtFullT = 0, rtOffT = -1e9, wasCovered = false, wasReady = false;
   const nearestK = p => { const k = frameAt(p); return k + 1 < FR.length && Math.abs(FR[k + 1].p - p) < Math.abs(FR[k].p - p) ? k + 1 : k; };
 
   function tick() {
@@ -791,7 +828,9 @@
     camAt(pS); coneU.cC.value.copy(tmpP); coneU.cT.value.copy(tmpT); coneU.cOpen.value = cutNow;     // the x-ray window, as rendered
     // frames go up ahead as usual except well inside the live layer's range (near its ends the frames beyond must be ready)
     // under the live layer no frames go up ahead, except near its far end (the frames after it must be ready by then)
-    const want = photoOK() ? 0 : 1; feed(pS, restNow, rtLive && !atFrame ? (pS < .54 ? 2 : 1) : 0); if (want || liveEase > 0) loadSky();
+    const T0 = window.__kdT ? performance.now() : 0;
+    const want = photoOK() ? 0 : 1; feed(pS, restNow, rtLive && !atFrame && rtRange > .999); if (want || liveEase > 0) loadSky();
+    const T1 = T0 && performance.now();
     smx += (mx - smx) * Math.min(1, dt * 3); smy += (my - smy) * Math.min(1, dt * 3);
     const D = tmpP.distanceTo(tmpT), d = D * .02 * want * want;
     camera.position.set(tmpP.x + smx * d * 3, tmpP.y - smy * d * 2, tmpP.z + smx * d);
@@ -807,14 +846,18 @@
     if (off > .001) camera.setViewOffset(cw, ch, -ch * .224 * off, ch * .06 * off, cw, ch);
     else if (mOff > .001) camera.setViewOffset(cw, ch, 0, -ch * .2 * mOff, cw, ch); else camera.clearViewOffset();
     plateU.fPhi.value = (now / 1000 * .9) % (Math.PI * 2);                  // the fans turn at ~50 deg/s
+    const T2 = T0 && performance.now();
     const pl = want < .999 ? updatePlate(pS, restNow, now) : false, shown = !!pl;
+    const T3 = T0 && performance.now();
     // the live layer shows until the frame the reader stopped on is on screen at full size (or close to a second has gone by)
     const photoReady = atFrame && onGPU(snapK) && ((hi[snapK] && hi[snapK].up) || now - atFrameT > 900);
     const rtShow = rtLive && !photoReady ? rtRange : 0;
-    if (RT) RT.show(rtShow);
+    // the fades belong to stopping and starting (photo in / out); scrolling across the chapter's ends crossfades by position
+    if (RT) RT.show(rtShow, photoReady || wasReady);
+    if (photoReady && !wasReady) rtOffT = now; wasReady = photoReady;
     if (rtShow >= .999) { if (!rtFullT) rtFullT = now; } else rtFullT = 0;
-    if (rtShow > .001) rtOffT = now;
-    if (rtShow > .001 || now - rtOffT < 350) { camera.updateMatrixWorld(); RT.render(camera, tmpP, tmpT, pS, now); }      // (and while it fades out)
+    if (rtShow > .001 || (photoReady && now - rtOffT < 350)) { camera.updateMatrixWorld(); RT.render(camera, tmpP, tmpT, pS, now); }      // (and while it fades out to the photo)
+    const T4 = T0 && performance.now();
     const covered = rtShow >= .999;                            // the live layer over this canvas: nothing to draw under it
     plateOn = shown; const ps_ = pl === "stale" ? "stale" : shown ? "1" : "0"; if (stage.dataset.photo !== ps_) stage.dataset.photo = ps_;
     photoEase += ((shown ? 1 : 0) - photoEase) * Math.min(1, dt * 4);
@@ -824,6 +867,8 @@
     hideOv = want < .999 && !shown;                            // no photo yet: no glows or labels
     if (shown && loadEl) loadEl.classList.add("done");
     if (!covered) compose(liveEase, !hideOv);
+    if (covered !== wasCovered) { wasCovered = covered; canvas.style.visibility = covered ? "hidden" : ""; }   // under the live layer this canvas leaves the compositor
+    if (T0) window.__kdT.push([T1 - T0, T3 - T2, T4 - T3, performance.now() - T4, performance.now() - now]);   // diagnostics: feed, plate, live layer, compose, whole update
     if (window.__kdDiag) window.__kdDiag.push([now, pS, rtShow, covered ? 1 : 0, pl === "stale" ? 2 : pl ? 1 : 0, lastPair ? lastPair[0] : -1]);   // diagnostics
 
     flushPins();

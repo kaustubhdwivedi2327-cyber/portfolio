@@ -18,31 +18,52 @@
   };
   K.resize = (w, h) => {
     W = w; H = h; if (!renderer) return;
-    renderer.setSize(w, h, false); const pr = renderer.getPixelRatio();
-    if (rt) rt.dispose(); rt = new T.WebGLRenderTarget(Math.max(1, Math.round(w * pr)), Math.max(1, Math.round(h * pr)), { type: T.HalfFloatType, samples: 4 });
+    renderer.setSize(w, h, false); if (rt) { rt.dispose(); rt = null; } if (rtLow) { rtLow.dispose(); rtLow = null; }
   };
+  // the drawing buffers, made when needed and released after a few idle seconds (they are most of the GPU memory it holds)
+  let lastUse = 0, rtLow = null;
+  const target = (scale) => { const pr = renderer.getPixelRatio() * scale;
+    return new T.WebGLRenderTarget(Math.max(1, Math.round(W * pr)), Math.max(1, Math.round(H * pr)), { type: T.HalfFloatType, samples: 4 }); };
+  const ensureRT = () => { lastUse = performance.now(); if (!rt) rt = target(1); };
+  // while the reader scrolls fast the scene is drawn at half resolution and scaled up (a quarter of the work: at that
+  // speed nobody sees it, and a stopped view is the rendered photo anyway); normal scrolling is drawn at full resolution
+  const ensureLow = () => { lastUse = performance.now(); if (!rtLow) rtLow = target(.5); };
   // 0..1: how much of the layer shows (CSS fades it: in quickly, out over a quarter second)
-  K.show = v => {
+  K.show = (v, fade) => {
     if (!canvas || v === shown) return; const up = v > shown; shown = v;
-    canvas.style.transition = up ? "opacity .08s linear" : "opacity .25s ease-out"; canvas.style.opacity = v.toFixed(3);
+    canvas.style.transition = !fade ? "none" : up ? "opacity .08s linear, visibility 0s" : "opacity .25s ease-out, visibility 0s .25s"; canvas.style.opacity = v.toFixed(3);
+    canvas.style.visibility = v > 0 ? "visible" : "hidden";             // (a hidden layer costs the compositor nothing)
   };
-  K.load = () => { if (K.loading || !canvas) return; K.loading = true; build().then(() => { K.ready = true; }, e => { K.failed = true; console.warn("live x-ray layer unavailable:", e); }); };
+  let ctrl = null;
+  K.pause = () => { if (ctrl && !K.ready) ctrl.abort(); };           // stops the downloads (K.load starts them again)
+  K.load = () => {
+    if (K.loading || K.ready || K.failed || !canvas) return; K.loading = true;
+    build().then(() => { K.ready = true; K.loading = false; }, e => { K.loading = false; if (e && e.name === "AbortError") return; K.failed = true; console.warn("live x-ray layer unavailable:", e); });
+  };
 
+  function dropArray() { this.array = null; }
   async function build() {
+    // everything is downloaded first (low priority, cancellable) and decoded off the main thread; nothing is made until then
+    ctrl = new AbortController(); const opt = { signal: ctrl.signal, priority: "low" };
+    const get = u => fetch(u, opt).then(r => { if (!r.ok) throw new Error(u); return r; });
+    const json = u => get(u).then(r => r.json()), bin = u => get(u).then(r => r.arrayBuffer());
+    const bitmapOf = (u, flip = true) => get(u).then(r => r.blob())
+      .then(b => createImageBitmap(b, { premultiplyAlpha: "none", colorSpaceConversion: "none", imageOrientation: flip ? "flipY" : "none" }));
+    const [g, buf, bake, cmeta, envBuf, lutImg] = await Promise.all([json(A + "rt_geo.json"), bin(A + "rt_geo.bin"), json(A + "rt_meta.json"),
+      json("assets/models/crm-meta.json"), bin(A + "rt_env.bin"), bitmapOf(A + "rt_lut.png", false)]);
+    const names = Object.keys(bake), ambNames = names.filter(k => bake[k].arange);
+    const [bms, abms, pbm] = await Promise.all([Promise.all(names.map(k => bitmapOf(A + `rt_${k}.webp`))), Promise.all(ambNames.map(k => bitmapOf(A + `rt_${k}_amb.webp`))),
+      bitmapOf("assets/render/pano.jpg")]);
     renderer = new T.WebGLRenderer({ canvas, antialias: false, alpha: false, powerPreference: "high-performance" });
     renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5));        // 2x is fill-bound on an integrated GPU; 1.5x holds 120 Hz
     renderer.outputEncoding = T.LinearEncoding; renderer.toneMapping = T.NoToneMapping;
     scene = new T.Scene();
-    const json = u => fetch(u).then(r => { if (!r.ok) throw new Error(u); return r.json(); }), bin = u => fetch(u).then(r => { if (!r.ok) throw new Error(u); return r.arrayBuffer(); });
-    const img = u => new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => no(new Error(u)); i.src = u; });
     const gl = renderer.getContext(), jobs = [], anisoX = gl.getExtension("EXT_texture_filter_anisotropic");
     // shaders compile in the background: no status queries (they would wait) until the driver says they are done
     const par = gl.getExtension("KHR_parallel_shader_compile"); renderer.debug.checkShaderErrors = false;
     const WAIT = "wait", compiled = () => !par || renderer.info.programs.every(p => gl.getProgramParameter(p.program, par.COMPLETION_STATUS_KHR));
     let waitN = 0; const waitCompiled = () => { if (compiled() || ++waitN > 600) { waitN = 0; return true; } return WAIT; };
-    // a texture three.js draws but does not fill: storage made here, filled in strips by jobs (decoded off the main thread)
-    const bitmapOf = u => fetch(u).then(r => { if (!r.ok) throw new Error(u); return r.blob(); })
-      .then(b => createImageBitmap(b, { premultiplyAlpha: "none", colorSpaceConversion: "none", imageOrientation: "flipY" }));
+    // a texture three.js draws but does not fill: storage made here, filled in strips by jobs
     const stripTex = (bm, srgb, mips, repeatS) => {
       const w = bm.width, h = bm.height, t = new T.Texture(), g = gl.createTexture(), Pp = renderer.properties.get(t);
       t.image = { width: w, height: h }; t.flipY = false; t.generateMipmaps = false; t.encoding = srgb ? T.sRGBEncoding : T.LinearEncoding;
@@ -65,13 +86,8 @@
       if (mips) jobs.push(() => { renderer.state.bindTexture(gl.TEXTURE_2D, g); gl.generateMipmap(gl.TEXTURE_2D); return true; });
       return t;
     };
-    const [g, buf, bake, cmeta, envBuf, lutImg] = await Promise.all([json(A + "rt_geo.json"), bin(A + "rt_geo.bin"), json(A + "rt_meta.json"),
-      json("assets/models/crm-meta.json"), bin(A + "rt_env.bin"), img(A + "rt_lut.png")]);
     geo = g;
-    const aniso = renderer.capabilities.getMaxAnisotropy(), atlas = {}, ambTex = {};
-    const names = Object.keys(bake), ambNames = names.filter(k => bake[k].arange);
-    const [bms, abms, pbm] = await Promise.all([Promise.all(names.map(k => bitmapOf(A + `rt_${k}.webp`))), Promise.all(ambNames.map(k => bitmapOf(A + `rt_${k}_amb.webp`))),
-      bitmapOf("assets/render/pano.jpg")]);
+    const atlas = {}, ambTex = {};
     names.forEach((k, i) => { atlas[k] = stripTex(bms[i], true, true); });
     ambNames.forEach((k, i) => { ambTex[k] = stripTex(abms[i], true, true); });
     const pano = stripTex(pbm, false, false, true);
@@ -236,6 +252,7 @@
       gm.setIndex(new T.BufferAttribute(new Uint32Array(buf, c.idx, c.ni), 1));
       if (c.uv2 != null) gm.setAttribute("uv2b", new T.BufferAttribute(new Uint16Array(buf, c.uv2, c.nv * 2), 2, true));
       gm.boundingSphere = new T.Sphere(new T.Vector3(.5, .5, .5), .87); gm.boundingBox = new T.Box3(new T.Vector3(), new T.Vector3(1, 1, 1));
+      for (const a of [...Object.values(gm.attributes), gm.index]) (a.isInterleavedBufferAttribute ? a.data : a).onUpload(dropArray);   // (the page's copy goes once it is on the GPU)
       const R = bake[c.atlas].range, t = atlas[c.atlas], isInt = c.atlas === "int" || c.atlas === "hero";
       let mat;
       if (c.shade === "paint") {
@@ -271,7 +288,8 @@
         "}"].join("\n"),
       depthTest: false, depthWrite: false });
     postScene = new T.Scene(); postCam = new T.Camera(); postScene.add(new T.Mesh(new T.PlaneGeometry(2, 2), post));
-    K.resize(W, H);
+    K.resize(W, H); ensureRT();
+    setInterval(() => { if (performance.now() - lastUse > 4000) { if (rt) { rt.dispose(); rt = null; } if (rtLow) { rtLow.dispose(); rtLow = null; } } }, 2000);
 
     // warm-up, one part at a time: its geometry goes up and its shader compiles, so the first live frame costs nothing
     const wc = new T.PerspectiveCamera(30, W / H, .05, 900); wc.position.set(25.2, 4.25, 3.1); wc.lookAt(28.6, 4.6, 6.3); wc.updateMatrixWorld();
@@ -282,9 +300,9 @@
     for (const m of meshes) jobs.push(() => {
       for (const o of meshes) o.visible = o === m;
       const fc = m.frustumCulled; m.frustumCulled = false;
-      renderer.setRenderTarget(rt); renderer.render(scene, wc); renderer.setRenderTarget(null); m.frustumCulled = fc; return true;
+      ensureRT(); renderer.setRenderTarget(rt); renderer.render(scene, wc); renderer.setRenderTarget(null); m.frustumCulled = fc; return true;
     });
-    jobs.push(() => { for (const o of meshes) o.visible = true; renderer.initTexture(lut); post.uniforms.tHDR.value = rt.texture; renderer.render(postScene, postCam); return true; });
+    jobs.push(() => { for (const o of meshes) o.visible = true; renderer.initTexture(lut); ensureRT(); post.uniforms.tHDR.value = rt.texture; renderer.render(postScene, postCam); return true; });
     // the jobs run while the reader is not scrolling, a few milliseconds' worth per screen update
     await new Promise(done => {
       const step = () => {
@@ -299,8 +317,12 @@
 
   /* one live frame for the site's camera (the same camera as the frames), at scroll position p */
   const M1 = new T.Matrix4(), M2 = new T.Matrix4(), M3 = new T.Matrix4(), X = new T.Vector3(1, 0, 0);
+  let lastP = null, lastT = 0, fastUntil = 0;
   K.render = (camera, coneC, coneT, p, now) => {
     if (!K.ready) return;
+    const sp = lastP === null ? 0 : Math.abs(p - lastP) / Math.max(.001, (now - lastT) / 1000); lastP = p; lastT = now;
+    if (sp > .5) fastUntil = now + 250;                                    // (~2600 px a second and more: a fast flick)
+    const fast = now < fastUntil;
     const xr = smooth(p, .24, .32) * (1 - smooth(p, .52, .6)), cut = smooth(p, .24, .32) * (1 - smooth(p, .505, .535));
     const ret = smooth(p, .33, .42) * (1 - smooth(p, .45, .5));
     CU.cC.value.copy(coneC); CU.cT.value.copy(coneT); CU.cOpen.value = cut;
@@ -317,9 +339,10 @@
     for (const m of slats) m.depthWrite = .92 * xr < .01;
     slatU.uG.value = .92 * xr; TU.uRet.value = ret;
     const layers = camera.layers.mask; camera.layers.enableAll();
-    renderer.setRenderTarget(rt); renderer.setClearColor(0x000000, 0); renderer.clear(); renderer.render(scene, camera);
+    let tg; if (fast) { ensureLow(); tg = rtLow; } else { ensureRT(); tg = rt; }
+    renderer.setRenderTarget(tg); renderer.setClearColor(0x000000, 0); renderer.clear(); renderer.render(scene, camera);
     renderer.setRenderTarget(null);
-    post.uniforms.tHDR.value = rt.texture; post.uniforms.invVP.value.multiplyMatrices(camera.matrixWorld, camera.projectionMatrixInverse);
+    post.uniforms.tHDR.value = tg.texture; post.uniforms.invVP.value.multiplyMatrices(camera.matrixWorld, camera.projectionMatrixInverse);
     post.uniforms.camPos.value.setFromMatrixPosition(camera.matrixWorld);
     renderer.render(postScene, postCam);
     camera.layers.mask = layers;

@@ -107,6 +107,8 @@
     const idx = PROJECTS.findIndex(p => p.id === id); if (idx < 0) return false;
     seqTimers.forEach(clearInterval); seqTimers = []; if (io) io.disconnect();
     box.innerHTML = html(PROJECTS[idx], idx); scrollTo(0, 0); current = id;
+    // the first pictures of the page come first: fetched at once and ahead of anything else downloading
+    [...box.querySelectorAll("img")].slice(0, 4).forEach(im => { im.loading = "eager"; im.fetchPriority = "high"; });
     wire(PROJECTS[idx]);
     box.setAttribute("aria-label", PROJECTS[idx].title);
     return true;
