@@ -15,9 +15,12 @@
   const RT = /[?&]nolive(&|$)/.test(location.search) ? null : window.KDRT || null;    // the live x-ray layer (js/rt.js): its own canvas over this one (?nolive: off)
   if (RT) RT.attach(stage, canvas);
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches, small = innerWidth < 760;
-  const glOK = (() => { try { const c = document.createElement("canvas"); return !!(c.getContext("webgl2") || c.getContext("webgl")); } catch (e) { return false; } })();
   const fallback = () => root.classList.add("no-3d");
-  if (!window.THREE || reduce || !glOK) { fallback(); return; }
+  if (!window.THREE || reduce) { fallback(); return; }
+  // the page's one WebGL context, made here with the settings three.js asks for (a separate test context costs ~100 ms)
+  const GLA = { alpha: true, depth: true, stencil: true, antialias: true, premultipliedAlpha: true, preserveDrawingBuffer: false, powerPreference: "high-performance", failIfMajorPerformanceCaveat: false };
+  const glCtx = (() => { try { return canvas.getContext("webgl2", GLA) || canvas.getContext("webgl", GLA); } catch (e) { return null; } })();
+  if (!glCtx) { fallback(); return; }
   const T = THREE, M = "assets/models/";
 
   const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
@@ -25,16 +28,16 @@
   const lerp = (a, b, t) => a + (b - a) * t;
   const jet = v => [clamp(1.5 - Math.abs(4 * v - 3)), clamp(1.5 - Math.abs(4 * v - 2)), clamp(1.5 - Math.abs(4 * v - 1))];
   const gauss = () => { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
-  const lin = c => Math.pow(c / 255, 2.2);
+  const LIN = Float32Array.from({ length: 256 }, (_, c) => Math.pow(c / 255, 2.2)), lin = c => LIN[c];
   // the exported grey belly follows mesh vertices and shows a saw-tooth edge: paint the fuselage one white instead
   const belly = (c, o) => c[o] === 212 && c[o + 1] === 218 && c[o + 2] === 226;
   let AO_LO = .28, AO_A = .04, AO_B = .9;
 
   /* ---------- binary mesh loaders (meshes ship as base64 text so any static host serves them) ---------- */
-  async function getBuf(name) {
-    const b = atob((await (await fetch(M + name + ".b64.txt")).text()).trim()), u = new Uint8Array(b.length);
-    for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i);
-    return u.buffer;
+  async function getBuf(name) {               // (decoded by the browser itself, not a loop here; the loop if that fails)
+    const t = (await (await fetch(M + name + ".b64.txt")).text()).trim();
+    try { return await (await fetch("data:application/octet-stream;base64," + t)).arrayBuffer(); }
+    catch (e) { const b = atob(t), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u.buffer; }
   }
   async function kdm2(name) {
     const buf = await getBuf(name), dv = new DataView(buf);
@@ -85,7 +88,7 @@
   }
 
   /* ---------- renderer, scene, environment ---------- */
-  const renderer = new T.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: "high-performance" });
+  const renderer = new T.WebGLRenderer({ canvas, context: glCtx, antialias: true, alpha: true, powerPreference: "high-performance" });
   let dpr = Math.min(devicePixelRatio || 1, small ? 1.5 : 2);
   renderer.setPixelRatio(dpr);
   renderer.outputEncoding = T.sRGBEncoding; renderer.toneMapping = T.ACESFilmicToneMapping; renderer.toneMappingExposure = .92; renderer.localClippingEnabled = true;
@@ -368,7 +371,8 @@
   let fetching = 0, decoding = 0, lastC = 0, dir = 1, vel = 0, velT = 0, upT = 0, unfetched = FR.length;
   // every KEY-th frame of the flight is fetched early (after those around the reader): wherever the reader jumps on a
   // first visit, a frame no more than KEY / 2 away is already here to show
-  const KEY = 16; let keysLeft = Math.ceil(FR.length / KEY);
+  const KEY = 16; let keysLeft = Math.ceil(FR.length / KEY), keysAll = false;
+  const keysIn = () => { if (!keysAll) { keysAll = true; for (let k = 0; k < FR.length; k += KEY) if (!(st[k] >= 2)) { keysAll = false; break; } } return keysAll; };   // (all here)
   const get = (url, pr) => fetch(url, { priority: pr || "low" }).then(r => r.ok ? r.blob() : null, () => null);
   const bitmap = (b, o) => b ? createImageBitmap(b, o).catch(() => null) : null;
   const straight = { premultiplyAlpha: "none" };
@@ -770,6 +774,10 @@
     scrollTo({ top: flight.offsetTop + at * span, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
   });
   let pS = 0, last = performance.now(), raf = 0, slowFrames = 0, frames = 0;
+  // the opening shot: on arriving at the top, the view eases back from a little closer into the hero framing while the
+  // rest of the flight loads behind it. It moves on by screen updates rather than the clock (a hitch pauses it instead of
+  // making it jump), and the reader's first scroll takes over at once
+  const INTRO = 3.2; let introT = -1, introK = 1, introAt = 0, settled = false;
   let lastScrollP = -1, lastMove = 0, snapK = -1, atFrameT = 0, rtFullT = 0, rtOffT = -1e9, wasCovered = false, wasReady = false;
   const nearestK = p => { const k = frameAt(p); return k + 1 < FR.length && Math.abs(FR[k + 1].p - p) < Math.abs(FR[k].p - p) ? k + 1 : k; };
 
@@ -786,9 +794,18 @@
     // the view settles on the nearest rendered frame and that real photo shows (the live layer fades away)
     if (Math.abs(p - lastScrollP) > 1e-6) { lastMove = now; snapK = -1; } lastScrollP = p;
     const rtRange = RT && photoOK() ? smooth(pS, .2, .21) * (1 - smooth(pS, .6, .61)) : 0;      // short hand-overs at the chapter's ends
-    if (RT && photoOK() && ((ready && now - readyAt > 1500 && now - lastMove > 1500) || pS > .12)) RT.load();    // during a pause, or on the way in
+    // the opening shot: from the first photo on screen (only for a visit that starts at the top)
+    if (introT < 0 && (plateOn || (ready && !photoOK()))) { introT = p < .002 && !reduce && plateOn ? 0 : INTRO; introAt = now; }
+    if (introT >= 0 && introT < INTRO) introT = Math.min(INTRO, introT + Math.min(dt, 1 / 30));
+    if (introT >= 0 && lastMove > introAt) introK *= Math.exp(-dt / .12);          // the reader scrolled: it hands over
+    const ie = introT < 0 ? 0 : clamp(introT / INTRO), introV = introT < 0 ? 1 : (1 - ie * ie * (3 - 2 * ie)) * introK;
+    const intro = introT < 0 || (introT < INTRO && introK > .01);
+    // ready to scroll: the shot is over and the frames spread over the flight are here (or it has been a while)
+    if (!settled && !intro && ready && (keysIn() || now - readyAt > 4000)) { settled = true; stage.classList.add("settled"); }
+    // the live x-ray layer downloads once the spread-out frames are in (or on the way in), sets itself up after the shot
+    if (RT && photoOK() && ((ready && !intro && keysIn() && now - lastMove > 1500) || pS > .12)) RT.load();    // during a pause, or on the way in
     const rtLive = !!(RT && RT.ready && rtRange > .001);
-    if (RT) RT.still = now - lastMove > 300;                // the live layer sets itself up only while the reader is not scrolling
+    if (RT) RT.still = now - lastMove > 300 && !intro;      // the live layer sets itself up only while the reader is not scrolling
     // stopped: the view glides on as always, but to the nearest rendered frame; once nearly there the photo takes over
     // (re-projected over that last hair of distance, as the frames always were)
     if (rtLive && snapK < 0 && now - lastMove > 150) snapK = nearestK(p);
@@ -888,6 +905,8 @@
     const off = Math.min(smooth(pS, .2, .3), 1 - smooth(pS, .82, .92)) * (camera.aspect > 1 ? 1 : 0), cw = sW, ch = sH;
     const mOff = camera.aspect < 1 ? 1 - smooth(pS, .1, .24) : 0;
     // close-ups move the subject right and up by fixed fractions of the height (the rendered frames have the same shift baked in)
+    camera.zoom = 1 + .12 * introV;                            // (the opening shot: a little closer, easing back)
+    if (window.__kdIntro) window.__kdIntro.push([Math.round(now), Math.round(introT * 100) / 100, Math.round(introV * 1000) / 1000, plateOn ? 1 : 0, ready ? 1 : 0, settled ? 1 : 0]);   // diagnostics
     if (off > .001) camera.setViewOffset(cw, ch, -ch * .224 * off, ch * .06 * off, cw, ch);
     else if (mOff > .001) camera.setViewOffset(cw, ch, 0, -ch * .2 * mOff, cw, ch); else camera.clearViewOffset();
     plateU.fPhi.value = (now / 1000 * .9) % (Math.PI * 2);                  // the fans turn at ~50 deg/s

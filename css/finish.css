@@ -214,7 +214,7 @@ body.case-open .nav { display: none; }
   font: 500 10.5px var(--mono); letter-spacing: .22em; text-transform: uppercase; color: var(--text-3); transition: opacity .6s; }
 .scroll-cue i { display: block; width: 1px; height: 38px; background: linear-gradient(var(--text-2), transparent); transform-origin: 50% 0; animation: cue 2.4s var(--ease) infinite; }
 @keyframes cue { 0% { transform: scaleY(0); opacity: 1; } 55% { transform: scaleY(1); opacity: 1; } 100% { transform: scaleY(1); opacity: 0; } }
-.flight-stage:not(.loaded) .scroll-cue { opacity: 0; }
+.flight-stage:not(.settled) .scroll-cue { opacity: 0; }   /* (until the opening shot is over and the flight's frames are coming in) */
 .no-3d .scroll-cue { display: none; }
 .intro { background: var(--bg); padding-block: clamp(80px, 10vw, 140px) clamp(64px, 8vw, 110px); }
 .intro-lede { max-width: 58ch; font: 500 clamp(20px, 1.8vw, 26px)/1.5 var(--display); letter-spacing: -.012em; color: var(--text); text-wrap: pretty; }

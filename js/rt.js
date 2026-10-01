@@ -54,6 +54,9 @@
     const names = Object.keys(bake), ambNames = names.filter(k => bake[k].arange);
     const [bms, abms, pbm] = await Promise.all([Promise.all(names.map(k => bitmapOf(A + `rt_${k}.webp`))), Promise.all(ambNames.map(k => bitmapOf(A + `rt_${k}_amb.webp`))),
       bitmapOf("assets/render/pano.jpg")]);
+    // the making happens in a few stages, each on a screen update when the reader is not scrolling
+    const still = () => new Promise(ok => { const f = () => K.still ? ok() : requestAnimationFrame(f); requestAnimationFrame(f); });
+    await still();
     renderer = new T.WebGLRenderer({ canvas, antialias: false, alpha: false, powerPreference: "high-performance" });
     renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5));        // 2x is fill-bound on an integrated GPU; 1.5x holds 120 Hz
     renderer.outputEncoding = T.LinearEncoding; renderer.toneMapping = T.NoToneMapping;
@@ -75,8 +78,8 @@
       if (mips && anisoX) gl.texParameterf(gl.TEXTURE_2D, anisoX.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(8, gl.getParameter(anisoX.MAX_TEXTURE_MAX_ANISOTROPY_EXT)));
       Pp.__webglTexture = g; Pp.__webglInit = true;
       let y = 0;
-      jobs.push(() => {                 // one strip (~2 MB) per call
-        const n = Math.min(Math.max(1, Math.floor(2e6 / (w * 4))), h - y);
+      jobs.push(() => {                 // one strip (~1 MB) per call
+        const n = Math.min(Math.max(1, Math.floor(1e6 / (w * 4))), h - y);
         renderer.state.bindTexture(gl.TEXTURE_2D, g);
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
         gl.pixelStorei(gl.UNPACK_SKIP_ROWS, y); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, y, w, n, gl.RGBA, gl.UNSIGNED_BYTE, bm); gl.pixelStorei(gl.UNPACK_SKIP_ROWS, 0);
@@ -91,6 +94,7 @@
     names.forEach((k, i) => { atlas[k] = stripTex(bms[i], true, true); });
     ambNames.forEach((k, i) => { ambTex[k] = stripTex(abms[i], true, true); });
     const pano = stripTex(pbm, false, false, true);
+    await still();
     // the sky, linear HDR, for the reflections
     const env = new T.DataTexture(new Uint16Array(envBuf), 1024, 512, T.RGBAFormat, T.HalfFloatType);
     env.mapping = T.EquirectangularReflectionMapping; env.magFilter = env.minFilter = T.LinearFilter; env.needsUpdate = true;
@@ -110,6 +114,7 @@
     }
     const lut = new T.Data3DTexture(lutData, N, N, N); lut.format = T.RGBAFormat; lut.type = T.UnsignedByteType;
     lut.minFilter = lut.magFilter = T.LinearFilter; lut.unpackAlignment = 1; lut.needsUpdate = true;
+    await still();
 
     /* the x-ray window, as rendered: a cone from the camera to the subject (a cylinder near the camera) */
     CU = { cC: { value: new T.Vector3() }, cT: { value: new T.Vector3() }, cOpen: { value: 0 } };
@@ -294,7 +299,17 @@
     // warm-up, one part at a time: its geometry goes up and its shader compiles, so the first live frame costs nothing
     const wc = new T.PerspectiveCamera(30, W / H, .05, 900); wc.position.set(25.2, 4.25, 3.1); wc.lookAt(28.6, 4.6, 6.3); wc.updateMatrixWorld();
     const meshes = []; scene.traverse(o => { if (o.isMesh) meshes.push(o); });
-    // (three.js reads each program's uniforms as soon as it links, which waits for the compile: so one part per step)
+    // three.js reads a new program's uniforms the moment it is made, which waits for the driver to compile it (close to a
+    // second for the heaviest here). So first every program is made with that read answered "none" (no wait) and the
+    // driver compiles them all in the background; once they are done they are dropped and made again for real, which the
+    // driver now answers from its cache
+    const AU = gl.ACTIVE_UNIFORMS, gpp = gl.getProgramParameter.bind(gl); let dry = false;
+    gl.getProgramParameter = (p, n) => dry && n === AU ? 0 : gpp(p, n);
+    const dryRun = (sc, cam) => { dry = true; try { renderer.compile(sc, cam); } finally { dry = false; } return true; };
+    for (const m of meshes) jobs.push(() => { for (const o of meshes) o.visible = o === m; return dryRun(scene, wc); });
+    jobs.push(() => dryRun(postScene, postCam), waitCompiled);
+    jobs.push(() => { const ms = new Set(meshes.map(o => o.material)); ms.add(post); for (const mt of ms) mt.dispose(); return true; });
+    // (now for real, one part per step)
     for (const m of meshes) jobs.push(() => { for (const o of meshes) o.visible = o === m; renderer.compile(scene, wc); return true; });
     jobs.push(() => { renderer.compile(postScene, postCam); return true; });
     for (const m of meshes) jobs.push(() => {
