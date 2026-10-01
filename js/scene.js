@@ -366,6 +366,9 @@
   })();
   const pinned = new Set();             // frames kept whatever the distance (the exits, while the live layer shows)
   let fetching = 0, decoding = 0, lastC = 0, dir = 1, vel = 0, velT = 0, upT = 0, unfetched = FR.length;
+  // every KEY-th frame of the flight is fetched early (after those around the reader): wherever the reader jumps on a
+  // first visit, a frame no more than KEY / 2 away is already here to show
+  const KEY = 16; let keysLeft = Math.ceil(FR.length / KEY);
   const get = (url, pr) => fetch(url, { priority: pr || "low" }).then(r => r.ok ? r.blob() : null, () => null);
   const bitmap = (b, o) => b ? createImageBitmap(b, o).catch(() => null) : null;
   const straight = { premultiplyAlpha: "none" };
@@ -438,7 +441,7 @@
     if (c !== lastC) { dir = c > lastC ? 1 : -1; lastC = c; }
     const stride = Math.max(1, Math.min(4, Math.round(vel / 50)));                     // ~one decoded frame per refresh when fast
     const fetchK = k => {
-      fetching++; st[k] = 1; unfetched--;
+      fetching++; st[k] = 1; unfetched--; if (k % KEY === 0) keysLeft--;
       if (worker) { worker.postMessage({ cmd: "fetch", k, urls: [abs(RS + "m/" + FR[k].n + ".webp"), abs(RS + "bg/" + FR[k].n + ".webp")] }); return; }
       Promise.all([get(RS + "m/" + FR[k].n + ".webp"), get(RS + "bg/" + FR[k].n + ".webp")])
         .then(([ph, g]) => { if (ph) { blobs[k] = { ph, g }; st[k] = 2; } else st[k] = 5; }).finally(() => { fetching--; });
@@ -447,11 +450,12 @@
     pinned.clear();
     const exits = lite ? (dir > 0 ? [...EXITS.hi, ...EXITS.lo] : [...EXITS.lo, ...EXITS.hi]) : [];
     for (const k of exits) { pinned.add(k); if (fetching < 6 && !st[k]) fetchK(k); }
-    for (let r = 0; r < FR.length && fetching < 6 && unfetched > 0; r++) for (let side = 0; side < 2; side++) {
+    const fetchNear = (lim, keys) => { for (let r = 0; r <= lim && fetching < 6 && unfetched > 0; r++) for (let side = 0; side < 2; side++) {
       const k = c + (side ? -r : r) * dir;
-      if (fetching >= 6 || k < 0 || k >= FR.length || st[k]) continue;
+      if (fetching >= 6 || k < 0 || k >= FR.length || st[k] || (keys && k % KEY)) continue;
       fetchK(k);
-    }
+    } };
+    fetchNear(16); if (keysLeft > 0) fetchNear(FR.length, true); fetchNear(FR.length);     // around the reader, the key frames, the rest
     const toDecode = lite ? exits.map(k => [k]) : DECODE_ORDER.map(r0 => r0 <= BEHIND ? [c + r0 * stride * dir, c - r0 * dir] : [c + r0 * stride * dir]);
     for (const ks of toDecode) for (const k of ks) {
       if (decoding >= 4 || k < 0 || k >= FR.length || st[k] !== 2) continue;
@@ -464,6 +468,18 @@
           if (Math.abs(k - lastC) > DROP && !pinned.has(k)) st[k] = 2;
           else { bmps[k] = b; bgs[k] = g; st[k] = 4; } })
         .finally(() => { decoding--; });
+    }
+    // nothing near the reader decoded or on its way (a jump): the nearest frame already fetched, so the picture has one close by
+    if (!lite && decoding < 4) {
+      let any = false, best = -1;
+      for (let r = 0; r <= DROP && !any; r++) for (const k of [c + r * dir, c - r * dir]) {
+        if (k < 0 || k >= FR.length) continue;
+        if (st[k] === 3 || st[k] === 4) { any = true; break; }
+        if (best < 0 && st[k] === 2) best = k;
+      }
+      if (!any && best >= 0) { const k = best; decoding++; st[k] = 3;
+        if (worker) worker.postMessage({ cmd: "decode", k });
+        else { const f = blobs[k]; Promise.all([bitmap(f.ph, straight), bitmap(f.g, {})]).then(([b, g]) => { if (!b) { st[k] = 5; return; } bmps[k] = b; bgs[k] = g; st[k] = 4; }).finally(() => { decoding--; }); } }
     }
     const keep = k => pinned.has(k) || (lastPair && (k === lastPair[0] || k === lastPair[1]));
     for (let k = 0; k < FR.length; k++) if (bmps[k] && Math.abs(k - c) > DROP * stride && !keep(k)) { release(k); st[k] = 2; }
@@ -496,6 +512,12 @@
     }
     let near = false;                   // is any frame near the reader already on the GPU?
     for (let k = Math.max(0, c - 12); k <= Math.min(FR.length - 1, c + 13) && !near; k++) near = onGPU(k) && Math.abs(FR[k].p - p) < .02;
+    let close = false; for (let q = 0; q <= 6 && !close; q++) close = !!(texs[c + q * dir] || texs[c - q * dir]);
+    if (!near && !close && up < 1) for (let r = 7; r <= DROP && up < 1; r++) for (const k of [c + r * dir, c - r * dir]) {   // (a jump: the nearest decoded frame beyond the usual few)
+      if (up >= 1 || k < 0 || k >= FR.length || !has(k) || texs[k]) continue;
+      const tx = texs[k] = { ph: null, g: bgs[k] ? texOf(bgs[k]) : blank, up: false }; if (tx.g !== blank) renderer.initTexture(tx.g);
+      tx.ph = upload(tx, bmps[k], () => { tx.up = true; }); up++; upT = now;
+    }
     for (let r = 0; r <= 6; r++) for (let side = 0; side < 2; side++) {
       const k = r ? (side ? c - r * dir : c + r * stride * dir) : (side ? c + dir : c);
       if (near && now - upT < 33) continue;
@@ -612,19 +634,40 @@
     camera.layers.enableAll(); renderer.setRenderTarget(null);
   }
   const bufSize = new T.Vector2();
+  // may frame k be re-projected to the current view? only if it looked about the same way: the directions of the screen's
+  // corners must fall inside its picture, give or take a narrow margin (beyond its edges it has nothing to show and the
+  // picture smears; neighbouring frames, even where the camera turns fastest, stay within ~1.25)
+  const cDir = [0, 1, 2, 3].map(() => new T.Vector3()), cV4 = new T.Vector4(), camW = new T.Vector3();
+  let plateHeld = false;
+  const viewCorners = () => {
+    camW.setFromMatrixPosition(camera.matrixWorld);
+    cDir.forEach((d, c) => d.set(c & 1 ? 1 : -1, c & 2 ? 1 : -1, .5).unproject(camera).sub(camW).normalize());
+  };
+  const covers = k => {
+    const M = refVP(k);
+    for (const d of cDir) {
+      cV4.set(d.x, d.y, d.z, 0).applyMatrix4(M);
+      if (cV4.w <= 0 || Math.abs(cV4.x / cV4.w) > 1.35 || Math.abs(cV4.y / cV4.w) > 1.35) return false;
+    }
+    return true;
+  };
   function updatePlate(p, rest, now) {
     // the nearest decoded frame at or before the reader and the nearest after, blended by position (frames may be
     // skipped while scrolling fast)
     const i = frameAt(p), xray = xrNow > .001, reach = xray ? 8 : 24;   // in the x-ray (parts moving, interior not in the live model): only near frames
     let a = -1, b = -1, tt = 0, res = true;
-    for (let k = i; k >= Math.max(0, i - reach); k--) if (onGPU(k)) { a = k; break; }            // only frames already on the GPU,
-    for (let k = i + 1; k <= Math.min(FR.length - 1, i + reach + 1); k++) if (onGPU(k)) { b = k; break; }   // so drawing never uploads
+    camera.updateMatrixWorld(); viewCorners();
+    for (let k = i; k >= Math.max(0, i - reach); k--) if (onGPU(k) && covers(k)) { a = k; break; }            // only frames already on the GPU,
+    for (let k = i + 1; k <= Math.min(FR.length - 1, i + reach + 1); k++) if (onGPU(k) && covers(k)) { b = k; break; }   // so drawing never uploads
     if (a >= 0 && Math.abs(FR[a].p - p) > .05) a = -1;       // re-projected, a frame a little way off still sits right
     if (b >= 0 && Math.abs(FR[b].p - p) > .05) b = -1;
     if (a < 0 && b >= 0) { a = b; b = -1; }
     if (a >= 0 && b >= 0) { tt = clamp((p - FR[a].p) / (FR[b].p - FR[a].p)); if (tt < .01) b = -1; else if (tt > .99) { a = b; b = -1; tt = 0; } }
     if (a < 0) {
-      if (lastPair && onGPU(lastPair[0]) && (lastPair[1] < 0 || onGPU(lastPair[1]))) { [a, b, tt] = lastPair; res = "stale"; }
+      // nothing near covers the view: the nearest frame on the GPU (held as rendered below), else the last one shown
+      let n = -1; for (let r = 0; r <= reach && n < 0; r++) { if (onGPU(i - r)) n = i - r; else if (onGPU(i + 1 + r)) n = i + 1 + r; }
+      if (n >= 0 && Math.abs(FR[n].p - p) <= .05) { a = n; b = -1; tt = 0; res = "stale"; }
+      else if (lastPair && onGPU(lastPair[0]) && (lastPair[1] < 0 || onGPU(lastPair[1]))) { [a, b, tt] = lastPair; res = "stale"; }
       else return false;
     }
     if (window.__kdForce && onGPU(a - window.__kdForce)) { a -= window.__kdForce; b = -1; tt = 0; }       // diagnostics: re-project a frame further back
@@ -637,7 +680,10 @@
     renderer.getDrawingBufferSize(bufSize); plateU.res.value.copy(bufSize);
     camera.updateMatrixWorld(); plateU.invVP.value.multiplyMatrices(camera.matrixWorld, camera.projectionMatrixInverse); plateU.camPos.value.setFromMatrixPosition(camera.matrixWorld);
     plateU.dist.value = tmpP.distanceTo(tmpT);
-    if (res === "stale" && xray) { refVPat(p, heldVP); plateU.VPa.value = plateU.VPb.value = heldVP; }   // held as rendered, not re-projected
+    // the picture last shown, when nothing nearer is ready: re-projected only if it still covers the view, otherwise held
+    // as rendered (a clean photo of a nearby view until the right one arrives, never one stretched out of shape)
+    plateHeld = res === "stale" && (xray || Math.abs(FR[a].p - p) > .05 || !covers(a) || (b >= 0 && !covers(b)));
+    if (plateHeld) { refVPat(p, heldVP); plateU.VPa.value = plateU.VPb.value = heldVP; }
     else { plateU.VPa.value = refVP(a); plateU.VPb.value = refVP(b >= 0 ? b : a); }
     return res;
   }
@@ -866,7 +912,7 @@
     if (shown && photoEase > .98) photoEase = 1;
     if (liveEase < 0) liveEase = want;
     liveEase += (want - liveEase) * Math.min(1, dt * 4); if (Math.abs(want - liveEase) < .02) liveEase = want;
-    hideOv = want < .999 && !shown;                            // no photo yet: no glows or labels
+    hideOv = want < .999 && (!shown || plateHeld);             // no photo yet, or one held from a nearby view: no glows or labels
     if (shown && loadEl) loadEl.classList.add("done");
     if (!covered) compose(liveEase, !hideOv);
     if (covered !== wasCovered) { wasCovered = covered; canvas.style.visibility = covered ? "hidden" : ""; }   // under the live layer this canvas leaves the compositor
