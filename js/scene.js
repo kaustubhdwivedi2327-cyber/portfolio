@@ -325,7 +325,7 @@
 
   /* ---------- sizing, visibility, pointer ---------- */
   // layout is measured here, never inside the frame loop (a read there after the loop's own style writes forces a layout every frame)
-  let sW = 1, sH = 1, fTop = 0, fH = 1, vH = innerHeight;
+  let sW = innerWidth || 1, sH = innerHeight || 1, fTop = 0, fH = 1, vH = innerHeight;   // (the stage fills the window: its size while it is hidden)
   const measure = () => { sW = stage.clientWidth || sW; sH = stage.clientHeight || sH; fTop = flight.offsetTop; fH = flight.offsetHeight; vH = innerHeight; };
   // over the rendered frames (1200 px tall) a canvas taller than ~1350 px adds no detail, only cost
   const photoMode = () => innerWidth >= 760 && (window.FRAMES || []).length > 0 && sW / sH > 1.05 && sW / sH <= 2640 / 1200 + .01;

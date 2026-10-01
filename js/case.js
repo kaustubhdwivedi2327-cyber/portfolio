@@ -149,4 +149,15 @@
   });
   document.addEventListener("keydown", e => { if (e.key === "Escape" && box.classList.contains("open") && document.getElementById("lb").hidden) closeCase(); });
   addEventListener("popstate", () => { const m = location.hash.match(/^#project-([a-z-]+)$/); if (m) openCase(m[1]); else closeCase(); });
+  // a visit that starts on a project page opens it now, before the home page's 3D scene sets itself up (half a second of
+  // work): its pictures download meanwhile (the home page measures itself again when the project is closed)
+  { const m = location.hash.match(/^#project-([a-z-]+)$/); if (m) openCase(m[1]); }
+  // once the page has loaded and gone quiet, each project's first pictures are fetched in the background (about 1.4 MB for
+  // all of them, at low priority): a project then opens with its pictures already there
+  const warmed = [];
+  addEventListener("load", () => setTimeout(() => {
+    const go = () => PROJECTS.forEach((p, i) => { const t = document.createElement("template"); t.innerHTML = html(p, i);
+      [...t.content.querySelectorAll("img")].slice(0, 4).forEach(im => { const w = new Image(); w.fetchPriority = "low"; w.src = im.getAttribute("src"); warmed.push(w); }); });
+    if (window.requestIdleCallback) requestIdleCallback(go, { timeout: 3000 }); else go();
+  }, 2000), { once: true });
 })();
