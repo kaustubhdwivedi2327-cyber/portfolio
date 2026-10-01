@@ -748,10 +748,13 @@
     if (RT && photoOK() && ((ready && now - readyAt > 1500 && now - lastMove > 1500) || pS > .12)) RT.load();    // during a pause, or on the way in
     const rtLive = !!(RT && RT.ready && rtRange > .001);
     if (RT) RT.still = now - lastMove > 300;                // the live layer sets itself up only while the reader is not scrolling
-    if (rtLive && snapK < 0 && now - lastMove > 150 && Math.abs(p - pS) < 4e-4) snapK = nearestK(p);
+    // stopped: the view glides on as always, but to the nearest rendered frame; once nearly there the photo takes over
+    // (re-projected over that last hair of distance, as the frames always were)
+    if (rtLive && snapK < 0 && now - lastMove > 150) snapK = nearestK(p);
     const target = snapK >= 0 ? FR[snapK].p : p;
-    pS += (target - pS) * Math.min(1, dt * (snapK >= 0 ? 12 : 5));
-    if (snapK >= 0 && Math.abs(pS - target) < 3e-5) { pS = target; if (!atFrameT) atFrameT = now; } else atFrameT = 0;
+    pS += (target - pS) * Math.min(1, dt * 5);
+    if (snapK >= 0 && Math.abs(pS - target) < 3e-5) pS = target;
+    if (snapK >= 0 && Math.abs(pS - target) < .002) { if (!atFrameT) atFrameT = now; } else atFrameT = 0;
     const atFrame = atFrameT > 0, restNow = snapK >= 0 ? atFrame : Math.abs(p - pS) < 3e-4;
 
     // the sky lights come up once the aircraft has loaded
@@ -829,7 +832,8 @@
     // frames go up ahead as usual except well inside the live layer's range (near its ends the frames beyond must be ready)
     // under the live layer no frames go up ahead, except near its far end (the frames after it must be ready by then)
     const T0 = window.__kdT ? performance.now() : 0;
-    const want = photoOK() ? 0 : 1; feed(pS, restNow, rtLive && !atFrame && rtRange > .999); if (want || liveEase > 0) loadSky();
+    // (once the reader has stopped, the frames around them are prepared while the view is still settling)
+    const want = photoOK() ? 0 : 1; feed(pS, restNow, rtLive && snapK < 0 && rtRange > .999); if (want || liveEase > 0) loadSky();
     const T1 = T0 && performance.now();
     smx += (mx - smx) * Math.min(1, dt * 3); smy += (my - smy) * Math.min(1, dt * 3);
     const D = tmpP.distanceTo(tmpT), d = D * .02 * want * want;
@@ -849,9 +853,12 @@
     const T2 = T0 && performance.now();
     const pl = want < .999 ? updatePlate(pS, restNow, now) : false, shown = !!pl;
     const T3 = T0 && performance.now();
-    // the live layer shows until the frame the reader stopped on is on screen at full size (or close to a second has gone by)
-    const photoReady = atFrame && onGPU(snapK) && ((hi[snapK] && hi[snapK].up) || now - atFrameT > 900);
+    // the live layer shows until the frame the reader stopped on is on screen (its full-size copy, or after a moment the
+    // scrolling copy, which the full-size one then replaces as it always has)
+    const photoReady = atFrame && onGPU(snapK) && ((hi[snapK] && hi[snapK].up) || now - atFrameT > 300);
     const rtShow = rtLive && !photoReady ? rtRange : 0;
+    if (window.__kdHand) { const H = window.__kdHand; H.move = lastMove; if (snapK >= 0 && !H.snap) H.snap = now; if (snapK < 0) H.snap = H.at = H.gpu = H.ready = 0;
+      if (atFrame && !H.at) H.at = now; if (atFrame && onGPU(snapK) && !H.gpu) H.gpu = now; if (photoReady && !H.ready) H.ready = now; }   // diagnostics
     // the fades belong to stopping and starting (photo in / out); scrolling across the chapter's ends crossfades by position
     if (RT) RT.show(rtShow, photoReady || wasReady);
     if (photoReady && !wasReady) rtOffT = now; wasReady = photoReady;
