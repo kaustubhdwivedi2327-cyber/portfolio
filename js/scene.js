@@ -398,7 +398,8 @@
     const j = upJob, w = j.bm.width, h = j.bm.height, n = Math.min(Math.max(1, Math.floor(STRIP / (w * 4))), h - j.y);
     renderer.state.bindTexture(gl.TEXTURE_2D, renderer.properties.get(j.t).__webglTexture);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
-    gl.pixelStorei(gl.UNPACK_SKIP_ROWS, j.y); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, j.y, w, n, gl.RGBA, gl.UNSIGNED_BYTE, j.bm); gl.pixelStorei(gl.UNPACK_SKIP_ROWS, 0);
+    if (j.bm.buf) gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, j.y, w, n, gl.RGBA, gl.UNSIGNED_BYTE, j.bm.buf, j.y * w * 4);
+    else { gl.pixelStorei(gl.UNPACK_SKIP_ROWS, j.y); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, j.y, w, n, gl.RGBA, gl.UNSIGNED_BYTE, j.bm); gl.pixelStorei(gl.UNPACK_SKIP_ROWS, 0); }
     j.y += n; if (j.y >= h) { upJob = null; j.bm.close(); j.done(); }
   }
   const upload = (key, bm, done) => {   // start a picture going up (whole, where strips are not available)
@@ -418,24 +419,39 @@
   const WSRC = [
     "const files = new Map();",
     "const get = (u, pr) => fetch(u, { priority: pr || 'low' }).then(r => r.ok ? r.blob() : null, () => null);",
+    // pictures handed over as raw pixels (read back from a texture here, exactly as the page's own upload would store
+    // them): the page's uploads are then plain copies, where a picture object could stall it for a few hundred ms. The
+    // full-size photos and the frames prepared while the reader is still come this way; frames while scrolling come as
+    // pictures (a readback per frame would slow their preparation down)
+    "const raw = bm => { try { if (self.G && self.G.isContextLost()) { self.G = null; self.T = {}; } const G = self.G || (self.G = new OffscreenCanvas(1, 1).getContext('webgl2')); if (!G) return bm;",
+    "  const w = bm.width, h = bm.height, key = w + 'x' + h; self.T = self.T || {}; let o = self.T[key];",
+    "  if (!o) { const t = G.createTexture(); G.bindTexture(G.TEXTURE_2D, t); G.texStorage2D(G.TEXTURE_2D, 1, G.RGBA8, w, h); const fb = G.createFramebuffer();",
+    "    G.bindFramebuffer(G.FRAMEBUFFER, fb); G.framebufferTexture2D(G.FRAMEBUFFER, G.COLOR_ATTACHMENT0, G.TEXTURE_2D, t, 0); o = self.T[key] = { t, fb }; }",
+    "  G.bindTexture(G.TEXTURE_2D, o.t); G.pixelStorei(G.UNPACK_FLIP_Y_WEBGL, false); G.pixelStorei(G.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);",
+    "  G.texSubImage2D(G.TEXTURE_2D, 0, 0, 0, w, h, G.RGBA, G.UNSIGNED_BYTE, bm); G.bindFramebuffer(G.FRAMEBUFFER, o.fb);",
+    "  const buf = new Uint8Array(w * h * 4); G.readPixels(0, 0, w, h, G.RGBA, G.UNSIGNED_BYTE, buf);",
+    "  if (G.getError() !== G.NO_ERROR || G.isContextLost()) return bm;                    // (anything amiss: the picture as before)",
+    "  bm.close(); return { w, h, buf }; } catch (err) { return bm; } };",
+    "const out = (x, more) => x && x.buf ? [{ px: x }, [x.buf.buffer, ...more]] : [{ b: x }, x ? [x, ...more] : more];",
     "self.onmessage = async e => { const d = e.data;",
     "  if (d.cmd === 'fetch') { const [ph, g] = await Promise.all(d.urls.map(u => get(u))); if (ph) files.set(d.k, { ph, g }); postMessage({ cmd: 'fetched', k: d.k, ok: !!ph }); }",
     "  else if (d.cmd === 'decode') { const f = files.get(d.k); if (!f) { postMessage({ cmd: 'decoded', k: d.k }); return; }",
     "    try { const [b, g] = await Promise.all([createImageBitmap(f.ph, { premultiplyAlpha: 'none' }), f.g ? createImageBitmap(f.g) : null]);",
-    "      postMessage({ cmd: 'decoded', k: d.k, b, g }, g ? [b, g] : [b]); } catch (err) { postMessage({ cmd: 'decoded', k: d.k }); } }",
+    "      const [m, tr] = out(d.raw ? raw(b) : b, g ? [g] : []); postMessage(Object.assign({ cmd: 'decoded', k: d.k, g }, m), tr); } catch (err) { postMessage({ cmd: 'decoded', k: d.k }); } }",
     "  else if (d.cmd === 'full') { const b = await get(d.url, 'high'); let bm = null; try { bm = b ? await createImageBitmap(b) : null; } catch (err) {}",
-    "    postMessage({ cmd: 'full', k: d.k, bm }, bm ? [bm] : []); } };"].join("\n");
+    "    const [m, tr] = out(bm && d.raw ? raw(bm) : bm, []); postMessage(Object.assign({ cmd: 'full', k: d.k }, m), tr); } };"].join("\n");
   let worker = null;
   try { worker = new Worker(URL.createObjectURL(new Blob([WSRC], { type: "text/javascript" }))); } catch (e) { worker = null; }
   const abs = u => new URL(u, location.href).href;
+  const rawPic = p => p && { width: p.w, height: p.h, buf: p.buf, close() { this.buf = null; } };
   if (worker) {
     worker.onerror = () => { worker = null; };
     worker.onmessage = e => { const d = e.data, k = d.k;
       if (d.cmd === "fetched") { fetching--; st[k] = d.ok ? 2 : 5; }
-      else if (d.cmd === "decoded") { decoding--;
-        if (!d.b) { st[k] = 5; return; }
-        if (Math.abs(k - lastC) > DROP && !pinned.has(k)) { st[k] = 2; d.b.close(); if (d.g) d.g.close(); } else { bmps[k] = d.b; bgs[k] = d.g || null; st[k] = 4; } }
-      else if (d.cmd === "full") { const h = hi[k]; if (!h || !d.bm) { if (h) h.st = 3; if (d.bm) d.bm.close(); return; } h.bm = d.bm; h.st = 2; } };
+      else if (d.cmd === "decoded") { decoding--; const b = d.px ? rawPic(d.px) : d.b;
+        if (!b) { st[k] = 5; return; }
+        if (Math.abs(k - lastC) > DROP && !pinned.has(k)) { st[k] = 2; b.close(); if (d.g) d.g.close(); } else { bmps[k] = b; bgs[k] = d.g || null; st[k] = 4; } }
+      else if (d.cmd === "full") { const h = hi[k], bm = d.px ? rawPic(d.px) : d.b; if (!h || !bm) { if (h) h.st = 3; if (bm) bm.close(); return; } h.bm = bm; h.st = 2; } };
   }
   const dropHi = k => { const h = hi[k]; if (!h) return; if (upJob && upJob.key === h) upJob = null; if (h.tex) h.tex.dispose(); if (h.bm && h.bm.close) h.bm.close(); hi[k] = null; };
   function feed(p, rest, lite) {
@@ -464,7 +480,7 @@
     for (const ks of toDecode) for (const k of ks) {
       if (decoding >= 4 || k < 0 || k >= FR.length || st[k] !== 2) continue;
       decoding++; st[k] = 3;
-      if (worker) { worker.postMessage({ cmd: "decode", k }); continue; }
+      if (worker) { worker.postMessage({ cmd: "decode", k, raw: strips && rest }); continue; }
       const f = blobs[k];              // decoded at full size: the GPU scales it when drawing (a resize here runs on the GPU process's main thread)
       Promise.all([bitmap(f.ph, straight), bitmap(f.g, {})])
         .then(([b, g]) => {
@@ -482,7 +498,7 @@
         if (best < 0 && st[k] === 2) best = k;
       }
       if (!any && best >= 0) { const k = best; decoding++; st[k] = 3;
-        if (worker) worker.postMessage({ cmd: "decode", k });
+        if (worker) worker.postMessage({ cmd: "decode", k, raw: strips && rest });
         else { const f = blobs[k]; Promise.all([bitmap(f.ph, straight), bitmap(f.g, {})]).then(([b, g]) => { if (!b) { st[k] = 5; return; } bmps[k] = b; bgs[k] = g; st[k] = 4; }).finally(() => { decoding--; }); } }
     }
     const keep = k => pinned.has(k) || (lastPair && (k === lastPair[0] || k === lastPair[1]));
@@ -498,7 +514,7 @@
     const onScreen = lastPair ? [lastPair[0], lastPair[1]].filter(k => k >= 0) : [];
     if (rest) for (const k of onScreen) if (!hi[k] && has(k)) {
       const h = hi[k] = { st: 1 };
-      if (worker) { worker.postMessage({ cmd: "full", k, url: abs(FR[k].src) }); continue; }
+      if (worker) { worker.postMessage({ cmd: "full", k, url: abs(FR[k].src), raw: strips }); continue; }
       get(FR[k].src, "high").then(b => bitmap(b, {})).then(bm => { if (hi[k] !== h) return; if (bm) { h.bm = bm; h.st = 2; } else h.st = 3; });
     }
     for (let k = 0; k < FR.length; k++) if (hi[k] && Math.abs(k - c) > 3 && !onScreen.includes(k)) dropHi(k);
@@ -540,12 +556,12 @@
   const plateU = { pA: { value: blank }, mA: { value: blank }, gA: { value: blank }, pB: { value: blank }, mB: { value: blank }, gB: { value: blank },
     dTex: { value: blank }, fC0: { value: new T.Vector3() }, fC1: { value: new T.Vector3() }, fN: { value: new T.Vector3(1, 0, 0) }, fR: { value: 0 }, fPhi: { value: 0 },
     t: { value: 0 }, hasB: { value: 0 }, res: { value: new T.Vector2(1, 1) }, camPos: { value: new T.Vector3() },
-    invVP: { value: new T.Matrix4() }, VPa: { value: new T.Matrix4() }, VPb: { value: new T.Matrix4() }, hasD: { value: 0 }, dist: { value: 50 }, ghost: { value: 0 } };
+    invVP: { value: new T.Matrix4() }, VPa: { value: new T.Matrix4() }, VPb: { value: new T.Matrix4() }, hasD: { value: 0 }, dist: { value: 50 }, ghost: { value: 0 }, held: { value: 0 } };
   const plateMat = new T.ShaderMaterial({ uniforms: plateU, depthTest: false, depthWrite: false,
     vertexShader: "void main(){ gl_Position = vec4(position.xy, 0.0, 1.0); }",
     fragmentShader: [
       "uniform sampler2D pA, mA, gA, pB, mB, gB, dTex; uniform vec3 fC0, fC1, fN; uniform float fR, fPhi;",
-      "uniform float t, hasB, hasD, dist, ghost; uniform vec2 res; uniform vec3 camPos; uniform mat4 invVP, VPa, VPb;",
+      "uniform float t, hasB, hasD, dist, ghost, held; uniform vec2 res; uniform vec3 camPos; uniform mat4 invVP, VPa, VPb;",
       "const vec2 RP = vec2(" + RW + ".0, " + RH + ".0);",
       "vec2 toRef(mat4 VP, vec4 X) { vec4 c = VP * X; vec2 n = c.xy / c.w; return vec2((n.x * 0.5 + 0.5) * RP.x, (0.5 - n.y * 0.5) * RP.y); }",
       "vec3 world(vec2 ndc, float d) { vec4 w = invVP * vec4(ndc, d * 2.0 - 1.0, 1.0); return w.xyz / w.w; }",
@@ -572,6 +588,9 @@
       "  return 1.0; }",
       "void main() {",
       "  vec2 uv = gl_FragCoord.xy / res, ndc = uv * 2.0 - 1.0; vec3 dir = normalize(world(ndc, 1.0) - camPos);",
+      // a frame held as rendered: its photo as it is (the live aircraft, at another place by now, plays no part)
+      "  if (held > 0.5) { vec3 h = texture2D(pA, toRef(VPa, vec4(dir, 0.0)) / RP).rgb;",
+      "    if (hasB > 0.5) h = mix(h, texture2D(pB, toRef(VPb, vec4(dir, 0.0)) / RP).rgb, t); gl_FragColor = vec4(h, 1.0); return; }",
       "  float d = texture2D(dTex, uv).r, mS = texture2D(mA, toRef(VPa, vec4(dir, 0.0)) / RP).a;",
       "  if (d >= 1.0 && (mS > 0.0 || (hasB > 0.5 && texture2D(mB, toRef(VPb, vec4(dir, 0.0)) / RP).a > 0.0))) d = nearDepth(uv, res.y / RP.y);",
       "  float ac = d < 1.0 ? 1.0 : 0.0; vec3 X = world(ndc, min(d, 0.9999999));",
@@ -642,12 +661,17 @@
   // corners must fall inside its picture, give or take a narrow margin (beyond its edges it has nothing to show and the
   // picture smears; neighbouring frames, even where the camera turns fastest, stay within ~1.25)
   const cDir = [0, 1, 2, 3].map(() => new T.Vector3()), cV4 = new T.Vector4(), camW = new T.Vector3();
-  let plateHeld = false;
+  let plateHeld = false, subjD = 1;
+  const refPos = new Map(), framePos = k => { let v = refPos.get(k);    // where frame k's camera stood
+    if (!v) { keepP.copy(tmpP); keepT.copy(tmpT); camAt(FR[k].p); v = tmpP.clone(); tmpP.copy(keepP); tmpT.copy(keepT); refPos.set(k, v); } return v; };
   const viewCorners = () => {
-    camW.setFromMatrixPosition(camera.matrixWorld);
+    camW.setFromMatrixPosition(camera.matrixWorld); subjD = Math.max(.001, tmpP.distanceTo(tmpT));
     cDir.forEach((d, c) => d.set(c & 1 ? 1 : -1, c & 2 ? 1 : -1, .5).unproject(camera).sub(camW).normalize());
   };
   const covers = k => {
+    // ... and from about the same place: a camera moved by more than ~35% of its distance to the aircraft sees it from
+    // another side (neighbouring frames are 0.2-10% apart, a couple of them up to ~20% where the camera moves fastest)
+    if (framePos(k).distanceTo(camW) > .35 * subjD) return false;
     const M = refVP(k);
     for (const d of cDir) {
       cV4.set(d.x, d.y, d.z, 0).applyMatrix4(M);
@@ -687,6 +711,7 @@
     // the picture last shown, when nothing nearer is ready: re-projected only if it still covers the view, otherwise held
     // as rendered (a clean photo of a nearby view until the right one arrives, never one stretched out of shape)
     plateHeld = res === "stale" && (xray || Math.abs(FR[a].p - p) > .05 || !covers(a) || (b >= 0 && !covers(b)));
+    plateU.held.value = plateHeld ? 1 : 0;
     if (plateHeld) { refVPat(p, heldVP); plateU.VPa.value = plateU.VPb.value = heldVP; }
     else { plateU.VPa.value = refVP(a); plateU.VPb.value = refVP(b >= 0 ? b : a); }
     return res;
@@ -935,7 +960,7 @@
     if (shown && loadEl) loadEl.classList.add("done");
     if (!covered) compose(liveEase, !hideOv);
     if (covered !== wasCovered) { wasCovered = covered; canvas.style.visibility = covered ? "hidden" : ""; }   // under the live layer this canvas leaves the compositor
-    if (T0) window.__kdT.push([T1 - T0, T3 - T2, T4 - T3, performance.now() - T4, performance.now() - now]);   // diagnostics: feed, plate, live layer, compose, whole update
+    if (T0) window.__kdT.push([T1 - T0, T3 - T2, T4 - T3, performance.now() - T4, performance.now() - now, now, pS * 1000, rtShow * 1000, introV * 1000]);   // diagnostics: feed, plate, live layer, compose, whole update
     if (window.__kdDiag) window.__kdDiag.push([now, pS, rtShow, covered ? 1 : 0, pl === "stale" ? 2 : pl ? 1 : 0, lastPair ? lastPair[0] : -1]);   // diagnostics
 
     flushPins();
