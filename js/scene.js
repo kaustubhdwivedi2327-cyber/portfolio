@@ -832,8 +832,8 @@
     // frames go up ahead as usual except well inside the live layer's range (near its ends the frames beyond must be ready)
     // under the live layer no frames go up ahead, except near its far end (the frames after it must be ready by then)
     const T0 = window.__kdT ? performance.now() : 0;
-    // (once the reader has stopped, the frames around them are prepared while the view is still settling)
-    const want = photoOK() ? 0 : 1; feed(pS, restNow, rtLive && snapK < 0 && rtRange > .999); if (want || liveEase > 0) loadSky();
+    // (the frames around the reader are prepared once the view is nearly on its frame: brief pauses mid-scroll cost nothing)
+    const want = photoOK() ? 0 : 1; feed(pS, restNow, rtLive && !atFrame && rtRange > .999); if (want || liveEase > 0) loadSky();
     const T1 = T0 && performance.now();
     smx += (mx - smx) * Math.min(1, dt * 3); smy += (my - smy) * Math.min(1, dt * 3);
     const D = tmpP.distanceTo(tmpT), d = D * .02 * want * want;
