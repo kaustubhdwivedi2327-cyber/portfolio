@@ -350,8 +350,8 @@
   const frameAt = p => { let lo = 0, hi = FR.length - 1; while (hi - lo > 1) { const m = (lo + hi) >> 1; if (FR[m].p <= p) lo = m; else hi = m; } return lo; };
   // files stream in nearest-first (six frames at a time); frames near the reader are decoded (four at a time, up to AHEAD
   // in the scroll direction and BEHIND the other way, every other one first) and those further than DROP are released
-  const AHEAD = 10, BEHIND = 3, DROP = 12;
-  const DECODE_ORDER = [0, 1, 2, 4, 6, 8, 10, 3, 5, 7, 9];
+  const AHEAD = 14, BEHIND = 4, DROP = 26;
+  const DECODE_ORDER = [0, 1, 2, 4, 6, 8, 10, 12, 14, 3, 5, 7, 9, 11, 13];
   let fetching = 0, decoding = 0, lastC = 0, dir = 1, vel = 0, velT = 0, upT = 0, unfetched = FR.length;
   const get = url => fetch(url).then(r => r.ok ? r.blob() : null, () => null);
   const bitmap = (b, o) => b ? createImageBitmap(b, o).catch(() => null) : null;
@@ -455,7 +455,7 @@
     for (let k = 0; k < FR.length; k++) if (hi[k] && Math.abs(k - c) > 3 && !onScreen.includes(k)) dropHi(k);
     // upload ahead: one frame per screen update (a scrolling copy is ~3 ms, a full-size photo ~7 ms), nearest first
     let up = 0;
-    if (upJob) { stripStep(); up++; }                 // a picture part-way up: its next strip
+    if (upJob) { stripStep(); up++; if (upJob && !onGPU(c) && !onGPU(c + dir)) stripStep(); }   // a picture part-way up: its next strip (two when the reader has none)
     if (rest) for (const k of onScreen) { const h = hi[k]; if (up < 1 && h && h.st === 2 && !h.tex && onGPU(k)) { h.tex = upload(h, h.bm, () => { h.up = true; }); up++; } }
     // ahead-of-need uploads are paced (~30 a second) so a fast scroll does not upload on every refresh; the frames the
     // reader is at go up straight away
@@ -525,17 +525,18 @@
   let plateOn = false, lastPair = null;
   // the camera each frame was rendered with (same path, same lens shift; the frame's own 2640 x 1200 picture)
   const refCam = new T.PerspectiveCamera(30, RW / RH, .05, 900), refVPs = new Map(), keepP = new T.Vector3(), keepT = new T.Vector3();
-  const refVP = k => {
-    let m = refVPs.get(k); if (m) return m;
-    const q = FR[k].p; keepP.copy(tmpP); keepT.copy(tmpT);        // camAt writes the shared vectors: keep the reader's
+  const refVPat = (q, m) => {
+    keepP.copy(tmpP); keepT.copy(tmpT);                          // camAt writes the shared vectors: keep the reader's
     camAt(q); refCam.position.copy(tmpP); refCam.lookAt(tmpT);
     const off = Math.min(smooth(q, .2, .3), 1 - smooth(q, .82, .92));
     if (off > .001) refCam.setViewOffset(RW, RH, -RH * .224 * off, RH * .06 * off, RW, RH); else refCam.clearViewOffset();
-    refCam.updateMatrixWorld(); m = new T.Matrix4().multiplyMatrices(refCam.projectionMatrix, refCam.matrixWorldInverse);
-    tmpP.copy(keepP); tmpT.copy(keepT); refVPs.set(k, m); return m;
+    refCam.updateMatrixWorld(); m.multiplyMatrices(refCam.projectionMatrix, refCam.matrixWorldInverse);
+    tmpP.copy(keepP); tmpT.copy(keepT); return m;
   };
+  const refVP = k => { let m = refVPs.get(k); if (!m) { m = refVPat(FR[k].p, new T.Matrix4()); refVPs.set(k, m); } return m; };
+  const heldVP = new T.Matrix4();
   // the live aircraft's depth for this camera: solid parts only, cut by the x-ray plane like the drawn ones
-  let depthRT = null, depthList = null, xrNow = 0;
+  let depthRT = null, depthList = null, xrNow = 0, cutNow = 0;
   // the x-ray window, as rendered: inside a cone from the camera to the subject (a cylinder near the camera), up to a
   // depth past the subject; w scales the width, d is the depth past the subject
   const coneU = { cC: { value: new T.Vector3() }, cT: { value: new T.Vector3() }, cOpen: { value: 0 } };
@@ -579,10 +580,10 @@
   function updatePlate(p, rest, now) {
     // the nearest decoded frame at or before the reader and the nearest after, blended by position (frames may be
     // skipped while scrolling fast)
-    const i = frameAt(p);
+    const i = frameAt(p), xray = xrNow > .001, reach = xray ? 8 : 24;   // in the x-ray (parts moving, interior not in the live model): only near frames
     let a = -1, b = -1, tt = 0, res = true;
-    for (let k = i; k >= Math.max(0, i - 24); k--) if (onGPU(k)) { a = k; break; }            // only frames already on the GPU,
-    for (let k = i + 1; k <= Math.min(FR.length - 1, i + 25); k++) if (onGPU(k)) { b = k; break; }   // so drawing never uploads
+    for (let k = i; k >= Math.max(0, i - reach); k--) if (onGPU(k)) { a = k; break; }            // only frames already on the GPU,
+    for (let k = i + 1; k <= Math.min(FR.length - 1, i + reach + 1); k++) if (onGPU(k)) { b = k; break; }   // so drawing never uploads
     if (a >= 0 && Math.abs(FR[a].p - p) > .05) a = -1;       // re-projected, a frame a little way off still sits right
     if (b >= 0 && Math.abs(FR[b].p - p) > .05) b = -1;
     if (a < 0 && b >= 0) { a = b; b = -1; }
@@ -600,7 +601,9 @@
     plateU.t.value = tt; plateU.hasB.value = b >= 0 ? 1 : 0;
     renderer.getDrawingBufferSize(bufSize); plateU.res.value.copy(bufSize);
     camera.updateMatrixWorld(); plateU.invVP.value.multiplyMatrices(camera.matrixWorld, camera.projectionMatrixInverse); plateU.camPos.value.setFromMatrixPosition(camera.matrixWorld);
-    plateU.dist.value = tmpP.distanceTo(tmpT); plateU.VPa.value = refVP(a); plateU.VPb.value = refVP(b >= 0 ? b : a);
+    plateU.dist.value = tmpP.distanceTo(tmpT);
+    if (res === "stale" && xray) { refVPat(p, heldVP); plateU.VPa.value = plateU.VPb.value = heldVP; }   // held as rendered, not re-projected
+    else { plateU.VPa.value = refVP(a); plateU.VPb.value = refVP(b >= 0 ? b : a); }
     return res;
   }
   // compositing: sky and live aircraft fade in over the photo; overlays (lights, bird, contour, x-ray) always on top, masked by the aircraft's depth
@@ -706,6 +709,7 @@
     if (ready) {
       // chapter 1: x-ray of the inboard leading edge
       const xr = smooth(pS, .24, .32) * (1 - smooth(pS, .52, .6)); xrNow = xr;
+      cutNow = smooth(pS, .24, .32) * (1 - smooth(pS, .505, .535));   // the window closes while the camera pulls away (as rendered)
       // a scan plane sweeps aft through the aircraft; ahead of it the skin is cut away to show the structure inside
       const sx = lerp(-1.5, 41, xr); scan.constant = -sx; plateU.ghost.value = xr > .001 ? 1 : 0;
       ghostMat.uniforms.amt.value = xr; ghostMat.uniforms.sweep.value = sx; ghostMat.uniforms.band.value = Math.sin(Math.PI * xr) * (xr < .999 ? 1 : 0); wireMat.opacity = .85 * xr;
@@ -768,7 +772,7 @@
     }
 
     // camera; mouse parallax only while the view is live (the photos are fixed frames)
-    camAt(pS); coneU.cC.value.copy(tmpP); coneU.cT.value.copy(tmpT); coneU.cOpen.value = xrNow;     // the x-ray window, as rendered
+    camAt(pS); coneU.cC.value.copy(tmpP); coneU.cT.value.copy(tmpT); coneU.cOpen.value = cutNow;     // the x-ray window, as rendered
     const want = photoOK() ? 0 : 1; feed(pS, Math.abs(p - pS) < 3e-4); if (want || liveEase > 0) loadSky();
     smx += (mx - smx) * Math.min(1, dt * 3); smy += (my - smy) * Math.min(1, dt * 3);
     const D = tmpP.distanceTo(tmpT), d = D * .02 * want * want;
