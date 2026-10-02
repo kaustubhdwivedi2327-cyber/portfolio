@@ -1,0 +1,165 @@
+/* The arrival: while the flight loads (the aircraft, the frames beyond the x-ray, the live x-ray layer, the fonts), the
+   hero's own dusk sky shows a conformal approach HUD and the intro text; the aircraft comes in only once all of it is
+   ready, so nothing after it stutters. Every animation here is transform / opacity on HTML boxes (the compositor runs
+   them, so they stay smooth while the page's scripts are busy loading); js/scene.js only switches classes:
+   .ls (scene on) .go (fonts in: the text rises) .rv (loaded: the aircraft arrives) .fin (the 3D view has taken over). */
+
+/* ---------- the page waits on the hero meanwhile (its scrollbar's room kept, so nothing moves when it returns) ---------- */
+html.ls-lock { scrollbar-gutter: stable; }
+html.ls-lock body:not(.case-open) { overflow: hidden; }
+
+/* ---------- geometry: the vanishing point sits on the photo's own horizon (70 % down the render) ---------- */
+.ls {
+  --imgH: max(100svh, 100vw / 2.2);                 /* height of the cover-fitted 2640 x 1200 render */
+  --vx: 66%;                                         /* where the approach is flown: right of the intro text */
+  --vy: calc(50% + .2 * var(--imgH));                /* the render's horizon on screen */
+  --hu: min(1svh, 1.6vw);                            /* HUD unit */
+  --hud: rgba(238, 241, 245, .9); --hud-2: rgba(238, 241, 245, .5); --hud-3: rgba(238, 241, 245, .28);
+}
+.ls-only { display: none; }
+.ls:not(.fin) .ls-only { display: block; }
+.ls:not(.cv) #wing { opacity: 0; }
+.ls.cv #wing { animation: ls-fade-in .45s ease both; }      /* the 3D view over the same picture (only its lights are new); .fin follows */
+.ls.live .ls-craft, .ls.live .ls-photo { display: none; }   /* phones draw the live model: it fades in itself, no photo first */
+.ls-cam { position: absolute; inset: 0; z-index: -2; transform-origin: var(--vx) var(--vy); pointer-events: none; }
+.ls-cam .ls-cam { z-index: auto; }
+.ls-pic { position: absolute; inset: 0; }
+.ls-pic img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 50%; }
+.ls-anc { position: absolute; left: var(--vx); top: var(--vy); width: 0; height: 0; transform-origin: 0 0; }   /* zero-size anchor at the vanishing point */
+
+/* ---------- lights (static paint inside the moving layers) ---------- */
+.ls-lt { position: absolute; width: calc(var(--s, .3) * var(--hu)); aspect-ratio: 1; border-radius: 50%; transform: translate(-50%, -50%);
+  background: radial-gradient(closest-side, #fff 0 32%, rgba(255, 228, 196, .6) 56%, rgba(255, 214, 170, 0)); }
+.ls-lt.dim { opacity: .75; }
+.ls-lt.g { background: radial-gradient(closest-side, #e6fff1 0 30%, rgba(60, 207, 130, .75) 56%, rgba(60, 207, 130, 0)); }
+.ls-lt.r { background: radial-gradient(closest-side, #ffe2dc 0 28%, rgba(255, 90, 66, .8) 56%, rgba(255, 90, 66, 0)); }
+.ls-lt.a { background: radial-gradient(closest-side, #fff0e4 0 28%, rgba(255, 122, 56, .75) 56%, rgba(255, 122, 56, 0)); }
+.ls-rwy-svg { position: absolute; left: calc(-8 * var(--hu)); top: 0; width: calc(16 * var(--hu)); height: calc(9 * var(--hu)); overflow: visible; }
+
+/* ---------- the approach: runway closing slowly, approach lights streaming under the nose ---------- */
+.ls-ground { animation: ls-fade-in .9s var(--ease) .7s both; }
+.ls-rwy { animation: ls-appr 24s cubic-bezier(.3, .45, .35, 1) .4s both; }
+.ls-row { transform: scale(var(--k0)); opacity: var(--o0); animation: ls-row 2.4s linear infinite; animation-delay: calc(var(--i) * -.3s); }
+.ls-papi .w { opacity: 1; } .ls-papi .r { opacity: 0; }
+.ls-papi .p3 .w, .ls-papi .p4 .w { opacity: 0; } .ls-papi .p3 .r, .ls-papi .p4 .r { opacity: 1; }
+.ls-papi .p4 .w { animation: ls-fade-out .25s linear 1.45s both; } .ls-papi .p4 .r { animation: ls-fade-in .25s linear 1.45s both; }   /* slightly high ... */
+.ls-papi .p3 .w { animation: ls-fade-out .25s linear 2.25s both; } .ls-papi .p3 .r { animation: ls-fade-in .25s linear 2.25s both; }   /* ... on the glide path */
+
+/* ---------- conformal HUD (moves with the world): horizon line drawn out from the centre, pitch ladder ---------- */
+.ls-hz { position: absolute; top: 0; height: 1px; }
+.ls-hz.l { right: calc(2.2 * var(--hu)); width: 100vw; transform-origin: 100% 50%;
+  background: linear-gradient(270deg, var(--hud) 0, var(--hud-2) 12%, rgba(238, 241, 245, .16) 26%, rgba(238, 241, 245, 0) 36%); }
+.ls-hz.r { left: calc(2.2 * var(--hu)); width: 60vw; transform-origin: 0 50%;
+  background: linear-gradient(90deg, var(--hud) 0, var(--hud-2) 35%, rgba(238, 241, 245, .16) 75%, rgba(238, 241, 245, 0) 100%); }
+.ls-hz { animation: ls-draw 1.5s cubic-bezier(.65, 0, .35, 1) .25s both; }
+.ls-lad { position: absolute; top: calc(-12 * var(--hu)); height: 1px; width: calc(7.5 * var(--hu)); background: var(--hud-2); animation: ls-fade-in .8s ease .95s both; }
+.ls-lad.l { right: calc(3.2 * var(--hu)); } .ls-lad.r { left: calc(3.2 * var(--hu)); }
+.ls-lad::after { content: ""; position: absolute; top: 0; width: 1px; height: calc(.9 * var(--hu)); background: var(--hud-2); }
+.ls-lad.l::after { left: 0; } .ls-lad.r::after { right: 0; }
+
+/* ---------- fixed HUD: combiner corners and the flight path marker capturing the glide path ---------- */
+.ls-hud { z-index: -1; pointer-events: none; }
+.ls-box { position: absolute; left: calc(-28 * var(--hu)); top: calc(-20 * var(--hu)); width: calc(56 * var(--hu)); height: calc(32 * var(--hu)); animation: ls-box-in 1.1s var(--ease) .5s both; }
+.ls-box i { position: absolute; width: calc(2.4 * var(--hu)); height: calc(2.4 * var(--hu)); border: 0 solid var(--hud-3); }
+.ls-box i:nth-child(1) { left: 0; top: 0; border-left-width: 1px; border-top-width: 1px; }
+.ls-box i:nth-child(2) { right: 0; top: 0; border-right-width: 1px; border-top-width: 1px; }
+.ls-box i:nth-child(3) { left: 0; bottom: 0; border-left-width: 1px; border-bottom-width: 1px; }
+.ls-box i:nth-child(4) { right: 0; bottom: 0; border-right-width: 1px; border-bottom-width: 1px; }
+.ls-fpm { position: absolute; left: 0; top: calc(5.8 * var(--hu)); animation: ls-capture 2.1s cubic-bezier(.45, 0, .25, 1) .55s both; }
+.ls-fpm-f { animation: ls-float 3.4s ease-in-out 2.6s infinite alternate; }
+.ls-fpm svg { position: absolute; width: calc(6.6 * var(--hu)); height: calc(3.3 * var(--hu)); left: calc(-3.3 * var(--hu)); top: calc(-2.2 * var(--hu)); overflow: visible; color: var(--hud); animation: ls-fpm-in .7s var(--ease) .55s both; }
+
+/* ---------- the arrival ---------- */
+.ls-craft img { opacity: 0; transform-origin: 72% 70%; }
+.ls-photo { opacity: 0; }
+.ls.rv .ls-cam { animation: none; }
+.ls.rv .ls-craft img { opacity: 1; animation: ls-craft 2.1s cubic-bezier(.16, 1, .3, 1) .05s both; }
+.ls.rv .ls-photo { opacity: 1; animation: ls-fade-in .8s ease 1.45s both; }
+.ls.rv .ls-ground { opacity: 0; animation: ls-fly 1.05s cubic-bezier(.55, 0, .8, .4) both; }
+.ls.rv .ls-conf { opacity: 0; animation: ls-fade-out .7s ease both; }
+.ls.rv .ls-hud { opacity: 0; animation: ls-hud-out .75s var(--ease) both; }
+.ls-pic.broken { visibility: hidden; }
+.ls:not(.cv) .pin { visibility: hidden; }                           /* labels belong to the drawn aircraft: none before it */                             /* a picture that failed to load: never its broken-image frame */
+.ls.rv.no-craft .ls-photo { animation-delay: .1s; }                /* no cut-out: the photo itself fades in at once */
+
+/* ---------- loader: the site's own "Loading aircraft" line, filled by the real progress (--p, 0..1) ---------- */
+.ls .scene-load { z-index: 3; animation: ls-fade-in .6s ease .3s both; }
+.ls .scene-load i { overflow: visible; }
+.ls .scene-load i::after { border-radius: 2px; transition: transform .5s var(--ease); }
+.ls .scene-load b { font: inherit; font-weight: 500; font-variant-numeric: tabular-nums; color: var(--text-3); letter-spacing: .08em; }
+.ls .scene-load.done { animation: none; opacity: 0; transition: opacity .5s ease .3s; }
+
+/* ---------- chapter rail: plotted as the route while loading, then it is the site's rail ---------- */
+.ls:not(.fin) .hud-step span { max-width: 140px; }
+.ls:not(.fin) .hud-step i { transform-origin: 100% 50%; animation: ls-bar .7s var(--ease) both; }
+.ls:not(.fin) .hud-step span { animation: ls-lbl .7s var(--ease) both; }
+.ls .flight-hud .hud-step:nth-child(1) > * { animation-delay: .95s; } .ls .flight-hud .hud-step:nth-child(2) > * { animation-delay: 1.12s; }
+.ls .flight-hud .hud-step:nth-child(3) > * { animation-delay: 1.29s; } .ls .flight-hud .hud-step:nth-child(4) > * { animation-delay: 1.46s; }
+.ls.rv:not(.fin) .hud-step:not(.on) span { opacity: 0; animation: ls-fade-out .5s ease .25s both; }
+/* the site animates the step's colour and its label's max-width (main thread): while the scene runs, opacity only, and the
+   faded route labels fold back to the site's max-width 0 unseen, with no transition (scene.js adds .idle right after .fin) */
+.ls:not(.fin) .hud-step { transition: opacity .3s; }
+.ls.fin:not(.idle) .hud-step span { transition: none; }
+.ls .flight-hud { z-index: 3; }
+
+/* ---------- intro text: motion.js's timings (power4.out / power3.out), started once the fonts are in ---------- */
+.ls:not(.go) .hero-name .ln > span { transform: translateY(110%); }
+.ls:not(.go) .c0 .eyebrow, .ls:not(.go) .hero-tag, .ls:not(.go) .c0 .actions { opacity: 0; }
+.ls.go .hero-name .ln > span { animation: ls-rise 1.3s cubic-bezier(.22, 1, .36, 1) .15s both; }
+.ls.go .hero-name .ln:nth-child(2) > span { animation-delay: .27s; }
+.ls.go .c0 .eyebrow { animation: ls-up 1.1s cubic-bezier(.25, 1, .5, 1) .4s both; }
+.ls.go .hero-tag { animation: ls-up 1.1s cubic-bezier(.25, 1, .5, 1) .48s both; }
+.ls.go .c0 .actions { animation: ls-up 1.1s cubic-bezier(.25, 1, .5, 1) .56s both; }
+/* the status dot: the site's ring animates box-shadow (main thread); while the scene runs the same ring is a scaled disc */
+.ls:not(.fin) .pulse { animation: none; position: relative; }
+.ls:not(.fin) .pulse::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--ok); opacity: 0; animation: ls-ring 2.8s infinite; }
+
+/* ---------- keyframes: transform and opacity only ---------- */
+@keyframes ls-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ls-fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes ls-rise { from { transform: translateY(110%); } to { transform: none; } }
+@keyframes ls-up { from { opacity: 0; transform: translateY(26px); } to { opacity: 1; transform: none; } }
+@keyframes ls-ring { 0% { opacity: .55; transform: scale(1); } 70%, 100% { opacity: 0; transform: scale(3); } }
+@keyframes ls-draw { from { transform: scaleX(0); } to { transform: none; } }
+@keyframes ls-bank { from { transform: rotate(-.35deg); } to { transform: rotate(.35deg); } }
+@keyframes ls-bob { from { transform: translateY(-1.5px); } to { transform: translateY(1.5px); } }
+@keyframes ls-push { from { transform: scale(1.02); } to { transform: scale(1.06); } }
+@keyframes ls-appr { from { transform: scale(.78); } to { transform: scale(1.42); } }
+/* a light row closing at constant speed: on screen it grows as 1 / distance from the vanishing point */
+@keyframes ls-row {
+  0% { transform: scale(.85); opacity: 0; } 10% { transform: scale(.931); opacity: .55; } 20% { transform: scale(1.029); opacity: .85; }
+  30% { transform: scale(1.15); opacity: 1; } 40% { transform: scale(1.303); } 50% { transform: scale(1.503); } 60% { transform: scale(1.777); }
+  70% { transform: scale(2.171); } 80% { transform: scale(2.791); } 86% { transform: scale(3.367); opacity: 1; } 90% { transform: scale(3.905); }
+  95% { transform: scale(4.88); opacity: .15; } 100% { transform: scale(6.5); opacity: 0; } }
+@keyframes ls-box-in { from { opacity: 0; transform: scale(1.06); } to { opacity: 1; transform: none; } }
+@keyframes ls-fpm-in { from { opacity: 0; transform: scale(1.5); } to { opacity: 1; transform: none; } }
+@keyframes ls-capture { from { transform: translateY(-1.8vh); } to { transform: none; } }
+@keyframes ls-float { from { transform: translate(-1px, -1.2px); } to { transform: translate(1.2px, 1.4px); } }
+@keyframes ls-bar { from { transform: scaleX(0); } to { transform: none; } }
+@keyframes ls-lbl { from { opacity: 0; transform: translateX(8px); } to { opacity: 1; transform: none; } }
+@keyframes ls-craft { 0% { opacity: 0; transform: translateX(14vw) scale(.9); } 32% { opacity: 1; } 100% { opacity: 1; transform: none; } }
+@keyframes ls-fly { from { opacity: 1; transform: none; } to { opacity: 0; transform: scale(1.4); } }
+@keyframes ls-hud-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: scale(1.12); } }
+
+.ls-bank { animation: ls-bank 7s ease-in-out infinite alternate; }
+.ls-bob { animation: ls-bob 3.3s ease-in-out infinite alternate; }
+.ls-push { animation: ls-push 20s cubic-bezier(.2, .6, .35, 1) both; }
+.ls-plate { animation: ls-fade-in 1.1s ease both; }
+
+/* ---------- portrait screens: the whole aircraft, low in the picture under the intro (as the site frames it on phones) ---------- */
+@media (max-aspect-ratio: 1/1) {
+  .ls { --picW: 190vw; --picH: calc(190vw / 2.2); --vy: 78%; --vx: 60%; }
+  .ls-pic { inset: auto; width: var(--picW); height: var(--picH); left: calc(50vw - .7 * var(--picW)); top: calc(var(--vy) - .7 * var(--picH));
+    -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 22%, #000 86%, transparent 100%); mask-image: linear-gradient(180deg, transparent 0, #000 22%, #000 86%, transparent 100%); }
+}
+@media (max-width: 760px) {
+  .ls-box, .ls-lad { display: none; }
+  .ls-row { animation-name: ls-row-m; }
+}
+@keyframes ls-row-m {
+  0% { transform: scale(.85); opacity: 0; } 10% { transform: scale(.931); opacity: .55; } 20% { transform: scale(1.029); opacity: .85; }
+  30% { transform: scale(1.15); opacity: 1; } 40% { transform: scale(1.303); } 50% { transform: scale(1.503); } 60% { transform: scale(1.777); }
+  70% { transform: scale(2.171); opacity: 1; } 80% { transform: scale(2.791); opacity: .35; } 86% { transform: scale(3.367); opacity: 0; } 100% { transform: scale(6.5); opacity: 0; } }
+
+/* ---------- no 3D (or reduced motion): none of this; the hero as it always was ---------- */
+.no-3d .ls-only { display: none !important; }

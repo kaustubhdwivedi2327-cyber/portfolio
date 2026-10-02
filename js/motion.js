@@ -25,6 +25,9 @@
 
   /* ---------- Native scrolling (no smooth-scroll library: it blocked the wheel inside overlays) ---------- */
   if (motion) G.registerPlugin(ST);
+  // the arrival (js/home.js) starts every visit on the hero: ScrollTrigger is told too, or each of its refreshes sets the
+  // browser back to restoring the old scroll position on a reload
+  if (motion && root.classList.contains("ls-lock") && !/^#project-/.test(location.hash) && ST.clearScrollMemory) ST.clearScrollMemory("manual");
   window.pageScroll = { stop: () => {}, start: () => {}, resize: () => { if (motion) ST.refresh(); } };
 
   /* ---------- Clicks: in-page nav, open project, open deck, open image ---------- */
@@ -107,9 +110,11 @@
   if (!motion) { meters.forEach(m => m.classList.add("on")); return; }
 
   /* ---------- Hero intro ---------- */
-  G.from(".hero-name .ln > span", { yPercent: 110, duration: 1.3, ease: "power4.out", stagger: 0.12, delay: 0.15 });
-  G.from([".c0 .eyebrow", ".hero-tag", ".c0 .actions"], { y: 26, opacity: 0, duration: 1.1, ease: "power3.out", stagger: 0.08, delay: 0.4 });
-  G.from("#wing", { opacity: 0, duration: 2, ease: "power2.out" });
+  if (!document.querySelector("#flight-stage.ls")) {      // (with the arrival scene, css/intro.css plays this on the compositor)
+    G.from(".hero-name .ln > span", { yPercent: 110, duration: 1.3, ease: "power4.out", stagger: 0.12, delay: 0.15 });
+    G.from([".c0 .eyebrow", ".hero-tag", ".c0 .actions"], { y: 26, opacity: 0, duration: 1.1, ease: "power3.out", stagger: 0.08, delay: 0.4 });
+    G.from("#wing", { opacity: 0, duration: 2, ease: "power2.out" });
+  }
 
   /* ---------- Statement: words light up as you read ---------- */
   const q = document.getElementById("quote");

@@ -15,7 +15,9 @@
   const RT = /[?&]nolive(&|$)/.test(location.search) ? null : window.KDRT || null;    // the live x-ray layer (js/rt.js): its own canvas over this one (?nolive: off)
   if (RT) RT.attach(stage, canvas);
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches, small = innerWidth < 760;
-  const fallback = () => root.classList.add("no-3d");
+  const LS = stage.classList.contains("ls");      // the arrival scene (js/home.js, css/intro.css): the aircraft comes in once all is loaded
+  let lsShown = false;                              // (the arrival over: revealed, or given up for the still hero)
+  const fallback = () => { lsShown = true; root.classList.add("no-3d"); root.classList.remove("ls-lock"); stage.classList.remove("ls"); if (RT) RT.pause(); };
   if (!window.THREE || reduce) { fallback(); return; }
   // the page's one WebGL context, made here with the settings three.js asks for (a separate test context costs ~100 ms)
   const GLA = { alpha: true, depth: true, stencil: true, antialias: true, premultipliedAlpha: true, preserveDrawingBuffer: false, powerPreference: "high-performance", failIfMajorPerformanceCaveat: false };
@@ -101,12 +103,13 @@
     vertexShader: "varying vec3 vDir; void main(){ vec4 w = modelMatrix * vec4(position, 1.0); vDir = w.xyz - cameraPosition; gl_Position = projectionMatrix * viewMatrix * w; }",
     fragmentShader: "uniform sampler2D map; uniform float opacity; varying vec3 vDir; void main(){ vec3 d = normalize(vDir); vec2 uv = vec2(atan(d.z, d.x) * 0.15915494 + 0.5, asin(clamp(d.y, -1.0, 1.0)) * 0.31830989 + 0.5); gl_FragColor = vec4(texture2D(map, uv).rgb, opacity); }" });
   const skyBall = new T.Mesh(new T.SphereGeometry(500, 48, 24), skyMat), skyScene = new T.Scene(); skyBall.frustumCulled = false; skyScene.add(skyBall);
-  let skyReady = false, skyAsked = false;
+  let skyReady = false, skyAsked = false, skyFailed = false;
   // loaded only where the live aircraft is drawn (phones, narrow or ultra-wide windows): on desktop the frames are the picture
   const loadSky = () => { if (skyAsked) return; skyAsked = true; new T.TextureLoader().load("assets/render/pano.jpg", t => {
     // the background shows the image's own sRGB values untouched; the lighting copy is decoded to linear
     t.minFilter = T.LinearFilter; t.generateMipmaps = false; skyMat.uniforms.map.value = t; skyReady = true;
-    const e = t.clone(); e.encoding = T.sRGBEncoding; e.mapping = T.EquirectangularReflectionMapping; e.needsUpdate = true; scene.environment = pmrem.fromEquirectangular(e).texture; }); };
+    const e = t.clone(); e.encoding = T.sRGBEncoding; e.mapping = T.EquirectangularReflectionMapping; e.needsUpdate = true; scene.environment = pmrem.fromEquirectangular(e).texture;
+    if (ready) warm(); }, undefined, () => { skyFailed = true; }); };   // (its lighting changes every lit material: compiled again now, not on the next view)
   // soft light from the open sky on the camera side, a faint warm rim from the afterglow behind, dim skylight
   const hemi = new T.HemisphereLight(0x5b6d92, 0x0b0907, .18); scene.add(hemi);
   const fill = new T.DirectionalLight(0xa4b8ff, .26); fill.position.set(-70, 22, 80); fill.target.position.set(30, 6, 0); scene.add(fill, fill.target);
@@ -161,7 +164,7 @@
 
   const leAt = zs => { const L = meta.leline; let k = 0; while (k < L.length - 2 && L[k + 1][2] < zs) k++; const a = L[k], b = L[k + 1], t = clamp((zs - a[2]) / (b[2] - a[2])); return [lerp(a[0], b[0], t), lerp(a[1], b[1], t), zs]; };
 
-  let loaded = 0; const tickLoad = x => { loaded++; if (loadEl) loadEl.style.setProperty("--p", loaded / 7); return x; };
+  let loaded = 0; const tickLoad = x => { loaded++; if (loadEl && !LS) loadEl.style.setProperty("--p", loaded / 7); return x; };
   Promise.all([kdm2("body").then(tickLoad), edges("edges").then(tickLoad), kdm2("slat_in").then(tickLoad), kdm2("slat_out").then(tickLoad), kdm1("can").then(tickLoad), fetch(M + "crm-meta.json").then(r => r.json()).then(tickLoad), getBuf("ao").then(b => new Uint8Array(b), () => null).then(tickLoad)]).then(([gBody, gE, gSi, gSo, gCan, m, aoB]) => {
     meta = m;
     // livery on the live model, matching the renders
@@ -297,7 +300,7 @@
     for (const sz of [1, -1]) {   // logo lights on the tailplane wash the fin
       const sl = new T.SpotLight(0xfff0d6, 3, 22, .7, .8, 1.6); sl.position.set(58.2, 7.4, 5.8 * sz); sl.target.position.set(60.4, 12.6, 0); craft.add(sl, sl.target);
       const pl = new T.PointLight(0xffffff, 0, 14, 1.8); pl.position.set(tip[0] + .6, tip[1] + .3, 29.2 * sz); craft.add(pl); strobeLights.push(pl); }
-    warm(); ready = true; if (photoOK()) try { depthPass(); } catch (e) {} readyAt = performance.now(); if (loadEl) loadEl.classList.add("done"); stage.classList.add("loaded");
+    warm(); ready = true; if (photoOK()) try { depthPass(); } catch (e) {} readyAt = performance.now(); if (loadEl && !LS) loadEl.classList.add("done"); stage.classList.add("loaded");
   }).catch(fallback);
 
   /* ---------- camera path ---------- */
@@ -339,7 +342,7 @@
   const measureC0 = () => { if (!c0Wrap) return; const nh = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--nav-h")) || 56; c0Over = Math.max(0, c0Wrap.offsetHeight + nh - stage.clientHeight); };
   if (c0Wrap) { new ResizeObserver(measureC0).observe(c0Wrap); new ResizeObserver(measureC0).observe(stage); }
   let visible = true;
-  new IntersectionObserver(([e]) => { visible = e.isIntersecting; if (visible) { measure(); tick(); } else if (window.KDRT) { window.KDRT.still = false; window.KDRT.pause(); } }, { rootMargin: "100px" }).observe(flight);
+  new IntersectionObserver(([e]) => { visible = e.isIntersecting; if (visible) { measure(); tick(); } else if (window.KDRT) { window.KDRT.still = false; if (!(LS && !lsShown)) window.KDRT.pause(); } }, { rootMargin: "100px" }).observe(flight);
   let mx = 0, my = 0, smx = 0, smy = 0;
   stage.addEventListener("pointermove", e => { mx = e.clientX / innerWidth - .5; my = e.clientY / innerHeight - .5; });
 
@@ -372,6 +375,13 @@
   // every KEY-th frame of the flight is fetched early (after those around the reader): wherever the reader jumps on a
   // first visit, a frame no more than KEY / 2 away is already here to show
   const KEY = 16; let keysLeft = Math.ceil(FR.length / KEY), keysAll = false;
+  // the frames beyond the x-ray (the live layer covers it) and at its two ends: all of them here before the aircraft shows
+  const REQ = FR.map((f, k) => f.p < .2 || f.p > .61 || EXITS.lo.includes(k) || EXITS.hi.includes(k));
+  let reqLeft = REQ.filter(Boolean).length, reqAll = false;
+  const reqIn = () => { if (!reqAll) { reqAll = true; for (let k = 0; k < FR.length; k++) if (REQ[k] && !(st[k] >= 2)) { reqAll = false; break; } } return reqAll; };
+  // (without the live layer - none, or it failed - the x-ray is drawn from frames too: then every frame is needed)
+  const needAll = () => !RT || RT.failed;
+  let allAll = false; const allIn = () => { if (!allAll) { allAll = true; for (let k = 0; k < FR.length; k++) if (!(st[k] >= 2)) { allAll = false; break; } } return allAll; };
   const keysIn = () => { if (!keysAll) { keysAll = true; for (let k = 0; k < FR.length; k += KEY) if (!(st[k] >= 2)) { keysAll = false; break; } } return keysAll; };   // (all here)
   const get = (url, pr) => fetch(url, { priority: pr || "low" }).then(r => r.ok ? r.blob() : null, () => null);
   const bitmap = (b, o) => b ? createImageBitmap(b, o).catch(() => null) : null;
@@ -454,14 +464,14 @@
       else if (d.cmd === "full") { const h = hi[k], bm = d.px ? rawPic(d.px) : d.b; if (!h || !bm) { if (h) h.st = 3; if (bm) bm.close(); return; } h.bm = bm; h.st = 2; } };
   }
   const dropHi = k => { const h = hi[k]; if (!h) return; if (upJob && upJob.key === h) upJob = null; if (h.tex) h.tex.dispose(); if (h.bm && h.bm.close) h.bm.close(); hi[k] = null; };
-  function feed(p, rest, lite) {
+  function feed(p, rest, lite, fetchOnly) {
     if (!photoOK()) return;
     const c = frameAt(p), now = performance.now(), dtv = Math.min(.1, Math.max(.001, (now - velT) / 1000)); velT = now;
     vel += (Math.abs(c - lastC) / dtv - vel) * Math.min(1, dtv * 6);               // frames per second the reader is passing
     if (c !== lastC) { dir = c > lastC ? 1 : -1; lastC = c; }
     const stride = Math.max(1, Math.min(4, Math.round(vel / 50)));                     // ~one decoded frame per refresh when fast
     const fetchK = k => {
-      fetching++; st[k] = 1; unfetched--; if (k % KEY === 0) keysLeft--;
+      fetching++; st[k] = 1; unfetched--; if (k % KEY === 0) keysLeft--; if (REQ[k]) reqLeft--;
       if (worker) { worker.postMessage({ cmd: "fetch", k, urls: [abs(RS + "m/" + FR[k].n + ".webp"), abs(RS + "bg/" + FR[k].n + ".webp")] }); return; }
       Promise.all([get(RS + "m/" + FR[k].n + ".webp"), get(RS + "bg/" + FR[k].n + ".webp")])
         .then(([ph, g]) => { if (ph) { blobs[k] = { ph, g }; st[k] = 2; } else st[k] = 5; }).finally(() => { fetching--; });
@@ -470,12 +480,16 @@
     pinned.clear();
     const exits = lite ? (dir > 0 ? [...EXITS.hi, ...EXITS.lo] : [...EXITS.lo, ...EXITS.hi]) : [];
     for (const k of exits) { pinned.add(k); if (fetching < 6 && !st[k]) fetchK(k); }
-    const fetchNear = (lim, keys) => { for (let r = 0; r <= lim && fetching < 6 && unfetched > 0; r++) for (let side = 0; side < 2; side++) {
+    const fetchNear = (lim, pick) => { for (let r = 0; r <= lim && fetching < 6 && unfetched > 0; r++) for (let side = 0; side < 2; side++) {
       const k = c + (side ? -r : r) * dir;
-      if (fetching >= 6 || k < 0 || k >= FR.length || st[k] || (keys && k % KEY)) continue;
+      if (fetching >= 6 || k < 0 || k >= FR.length || st[k] || (pick && !pick(k))) continue;
       fetchK(k);
     } };
-    fetchNear(16); if (keysLeft > 0) fetchNear(FR.length, true); fetchNear(FR.length);     // around the reader, the key frames, the rest
+    fetchNear(16); if (keysLeft > 0) fetchNear(FR.length, k => k % KEY === 0); if (reqLeft > 0) fetchNear(FR.length, k => REQ[k]);
+    // around the reader, the key frames, those the arrival waits for, then the rest - those under the live layer only once
+    // the aircraft is in (they are not seen while it covers them; before then they would only slow the arrival down)
+    if (!(LS && !lsShown) || needAll()) fetchNear(FR.length);
+    if (fetchOnly) return;
     const toDecode = lite ? exits.map(k => [k]) : DECODE_ORDER.map(r0 => r0 <= BEHIND ? [c + r0 * stride * dir, c - r0 * dir] : [c + r0 * stride * dir]);
     for (const ks of toDecode) for (const k of ks) {
       if (decoding >= 4 || k < 0 || k >= FR.length || st[k] !== 2) continue;
@@ -744,7 +758,7 @@
     }
     renderer.autoClear = true;
   }
-  let photoEase = 0, liveEase = -1, hideOv = false;
+  let photoEase = 0, liveEase = -1, hideOv = LS;
   // compile every shader (x-ray ghost, wires, gel, spray, contour, sky, crossfade quad) and allocate the crossfade buffer up front,
   // so entering a chapter never stalls on a shader compile
   function warm() {
@@ -803,16 +817,73 @@
   // rest of the flight loads behind it. It moves on by screen updates rather than the clock (a hitch pauses it instead of
   // making it jump), and the reader's first scroll takes over at once
   const INTRO = 3.2; let introT = -1, introK = 1, introAt = 0, settled = false;
+  // the arrival (js/home.js, css/intro.css): the CSS approach scene shows while all of this loads and sets itself up (its
+  // animations run on the compositor, so the work here never shows); then the aircraft comes in, and nothing after stutters
+  let lsCompose = !LS, lsLast = 0, lsFin = !LS;
+  // its clock counts only time the page is on screen: in a tab opened in the background (or left) nothing loads on screen
+  // updates, so wall time would run the 45 s limit out with nothing in
+  let lsHid = 0, lsHidAt = document.hidden ? 0 : -1, lsOffT = 0;     // (time with the hero out of view counts as away too)
+  document.addEventListener("visibilitychange", () => { const t = performance.now(); if (document.hidden) { if (lsHidAt < 0) lsHidAt = t; } else if (lsHidAt >= 0) { lsHid += t - lsHidAt; lsHidAt = -1; } });
+  const heroUp = () => !!(lastPair && hi[lastPair[0]] && hi[lastPair[0]].up);
+  const lsProgress = () => {
+    const parts = [[.15, loaded / 7], [.05, ready ? 1 : 0], [.05, window.__lsFonts ? 1 : 0]];
+    if (photoOK()) {
+      let kf = 0, kn = 0, rf = 0, rn = 0;
+      const all = needAll();
+      for (let k = 0; k < FR.length; k++) { if (k % KEY === 0) { kn++; if (st[k] >= 2) kf++; } if (REQ[k] || all) { rn++; if (st[k] >= 2) rf++; } }
+      parts.push([.1, kn ? kf / kn : 1], [.35, rn ? rf / rn : 1], [.05, plateOn && heroUp() ? 1 : 0]);
+      if (RT) parts.push([.3, RT.ready || RT.failed ? 1 : (RT.progress || 0)]);
+    }
+    let w = 0, v = 0; for (const [a, b] of parts) { w += a; v += a * b; } return v / w;
+  };
+  // (a reader already elsewhere in the flight - a menu link taken during the arrival - is not kept waiting for the hero's own picture)
+  const lsDone = () => ready && window.__lsFonts && (!photoOK() ? skyReady || skyFailed : ((pS > .01 || (plateOn && heroUp())) && keysIn() && (needAll() ? allIn() : reqIn()) && (!RT || RT.ready || RT.failed)));
+  function lsStep(now) {
+    // while the page is held on the hero it stays at the top (a reload part-way down has the browser, and ScrollTrigger's
+    // refresh, put the old position back)
+    if (scrollY > 0 && root.classList.contains("ls-lock") && !document.body.classList.contains("case-open")) scrollTo(0, 0);
+    if (now - lsLast > 250 && loadEl) { lsLast = now; const f = Math.min(.99, lsProgress()); loadEl.style.setProperty("--p", f.toFixed(3)); const b = loadEl.querySelector("b"); if (b) b.textContent = Math.floor(f * 100) + "%"; }
+    const at = now - lsHid - (lsHidAt >= 0 ? now - lsHidAt : 0);   // time on screen
+    if (lsDone() && at > 2600) lsReveal();                           // (never before the intro has played)
+    else if (at > 45000) { if (ready) lsReveal(); else fallback(); }   // never stuck: past 45 s, what there is (no aircraft: the still hero)
+  }
+  function lsReveal() {
+    lsShown = true; lsCompose = true; frames = slowFrames = 0;
+    const live = !photoOK() || pS > .01, cams = [...stage.querySelectorAll(".ls-cam")], from = cams.map(c => getComputedStyle(c).transform);
+    if (live) stage.classList.add("live");
+    stage.classList.add("rv");
+    if (loadEl) { loadEl.style.setProperty("--p", 1); const b = loadEl.querySelector("b"); if (b) b.textContent = "100%"; loadEl.classList.add("done"); }
+    cams.forEach((c, i) => { if (from[i] && from[i] !== "none") c.animate([{ transform: from[i] }, { transform: "none" }], { duration: 1900, easing: "cubic-bezier(.33, 0, .15, 1)" }); });
+    setTimeout(() => stage.classList.add("cv"), live ? 250 : 2300);        // the 3D view fades in over the same picture ...
+    setTimeout(() => {                                                       // ... then the scene's layers go and the page is free
+      stage.classList.add("fin"); stage.querySelectorAll(".hud-step span").forEach(sp => getComputedStyle(sp).maxWidth); stage.classList.add("idle");
+      // then the hero is exactly the site without the scene: its classes go (no finished animations left holding the
+      // canvas or the text), its layers leave the page, and the reader is free
+      setTimeout(() => {
+        stage.classList.remove("ls", "go", "rv", "cv", "fin", "idle", "live", "no-craft");
+        stage.querySelectorAll(".ls-only").forEach(e => e.remove());
+        root.classList.remove("ls-lock");
+        settled = true; stage.classList.add("settled"); lsFin = true;
+      }, 120);
+    }, live ? 1200 : 2800);
+  }
   let lastScrollP = -1, lastMove = 0, snapK = -1, atFrameT = 0, rtFullT = 0, rtOffT = -1e9, wasCovered = false, wasReady = false;
   const nearestK = p => { const k = frameAt(p); return k + 1 < FR.length && Math.abs(FR[k + 1].p - p) < Math.abs(FR[k].p - p) ? k + 1 : k; };
 
   function tick() {
     cancelAnimationFrame(raf);
-    if (!visible) return;
+    if (!visible && !(LS && !lsShown)) return;          // (the arrival keeps loading even when the reader has gone elsewhere)
     raf = requestAnimationFrame(tick);
     const now = performance.now(), dt = Math.min(.05, (now - last) / 1000); last = now;
-    // adaptive quality: drop resolution and shadows if frames are slow
-    frames++; if (dt > .026) slowFrames++;
+    if (!visible) {
+      if (lsOffT) lsHid += now - lsOffT; lsOffT = now;
+      feed(clamp((scrollY - fTop) / ((fH - vH) || 1)), false, false, true);
+      if (RT && photoOK()) { RT.load(); RT.still = false; RT.budget = 4; }
+      lsStep(now); return;
+    }
+    lsOffT = 0;
+    // adaptive quality: drop resolution and shadows if frames are slow (not judged on the arrival's deliberately busy ones)
+    if (lsCompose) { frames++; if (dt > .026) slowFrames++; }
     if (frames === 90) { if (slowFrames > 45 && dpr > 1) { dpr = 1; renderer.setPixelRatio(dpr); resize(); renderer.shadowMap.enabled = false; } frames = slowFrames = 0; }
     const span = fH - vH, p = clamp((scrollY - fTop) / (span || 1));
     // the live x-ray layer: in the x-ray chapter the aircraft is drawn live while the reader scrolls; once they stop,
@@ -820,17 +891,18 @@
     if (Math.abs(p - lastScrollP) > 1e-6) { lastMove = now; snapK = -1; } lastScrollP = p;
     const rtRange = RT && photoOK() ? smooth(pS, .2, .21) * (1 - smooth(pS, .6, .61)) : 0;      // short hand-overs at the chapter's ends
     // the opening shot: from the first photo on screen (only for a visit that starts at the top)
-    if (introT < 0 && (plateOn || (ready && !photoOK()))) { introT = p < .002 && !reduce && plateOn ? 0 : INTRO; introAt = now; }
+    if (introT < 0 && (plateOn || (ready && !photoOK()))) { introT = p < .002 && !reduce && plateOn && !LS ? 0 : INTRO; introAt = now; }
     if (introT >= 0 && introT < INTRO) introT = Math.min(INTRO, introT + Math.min(dt, 1 / 30));
     if (introT >= 0 && lastMove > introAt) introK *= Math.exp(-dt / .12);          // the reader scrolled: it hands over
     const ie = introT < 0 ? 0 : clamp(introT / INTRO), introV = introT < 0 ? 1 : (1 - ie * ie * (3 - 2 * ie)) * introK;
     const intro = introT < 0 || (introT < INTRO && introK > .01);
     // ready to scroll: the shot is over and the frames spread over the flight are here (or it has been a while)
-    if (!settled && !intro && ready && (keysIn() || now - readyAt > 4000)) { settled = true; stage.classList.add("settled"); }
+    if (!settled && !LS && !intro && ready && (keysIn() || now - readyAt > 4000)) { settled = true; stage.classList.add("settled"); }
     // the live x-ray layer downloads once the spread-out frames are in (or on the way in), sets itself up after the shot
-    if (RT && photoOK() && ((ready && !intro && keysIn() && now - lastMove > 1500) || pS > .12)) RT.load();    // during a pause, or on the way in
+    if (RT && photoOK() && ((LS && !lsShown) || (ready && !intro && keysIn() && now - lastMove > 1500) || pS > .12)) RT.load();    // during the arrival, a pause, or on the way in
     const rtLive = !!(RT && RT.ready && rtRange > .001);
-    if (RT) RT.still = now - lastMove > 300 && !intro;      // the live layer sets itself up only while the reader is not scrolling
+    // the live layer sets itself up only while the reader is not scrolling (and, behind the arrival scene, in bigger steps)
+    if (RT) { RT.still = (now - lastMove > 300 && !intro) || (LS && !lsShown); RT.budget = LS && !lsShown ? 12 : 4; }   // (on screen here: off it, above)
     // stopped: the view glides on as always, but to the nearest rendered frame; once nearly there the photo takes over
     // (re-projected over that last hair of distance, as the frames always were)
     if (rtLive && snapK < 0 && now - lastMove > 150) snapK = nearestK(p);
@@ -918,7 +990,7 @@
     // (the frames around the reader are prepared once the view is nearly on its frame: brief pauses mid-scroll cost nothing)
     const want = photoOK() ? 0 : 1; feed(pS, restNow, rtLive && !atFrame && rtRange > .999); if (want || liveEase > 0) loadSky();
     const T1 = T0 && performance.now();
-    smx += (mx - smx) * Math.min(1, dt * 3); smy += (my - smy) * Math.min(1, dt * 3);
+    smx += ((lsFin ? mx : 0) - smx) * Math.min(1, dt * 3); smy += ((lsFin ? my : 0) - smy) * Math.min(1, dt * 3);   // (held still through the hand-over: the scene's photo does not move)
     const D = tmpP.distanceTo(tmpT), d = D * .02 * want * want;
     camera.position.set(tmpP.x + smx * d * 3, tmpP.y - smy * d * 2, tmpP.z + smx * d);
     look.copy(tmpT); camera.lookAt(look);
@@ -941,14 +1013,14 @@
     // the live layer shows until the frame the reader stopped on is on screen (its full-size copy, or after a moment the
     // scrolling copy, which the full-size one then replaces as it always has)
     const photoReady = atFrame && onGPU(snapK) && ((hi[snapK] && hi[snapK].up) || now - atFrameT > 300);
-    const rtShow = rtLive && !photoReady ? rtRange : 0;
+    const rtShow = lsCompose && rtLive && !photoReady ? rtRange : 0;
     if (window.__kdHand) { const H = window.__kdHand; H.move = lastMove; if (snapK >= 0 && !H.snap) H.snap = now; if (snapK < 0) H.snap = H.at = H.gpu = H.ready = 0;
       if (atFrame && !H.at) H.at = now; if (atFrame && onGPU(snapK) && !H.gpu) H.gpu = now; if (photoReady && !H.ready) H.ready = now; }   // diagnostics
     // the fades belong to stopping and starting (photo in / out); scrolling across the chapter's ends crossfades by position
     if (RT) RT.show(rtShow, photoReady || wasReady);
     if (photoReady && !wasReady) rtOffT = now; wasReady = photoReady;
     if (rtShow >= .999) { if (!rtFullT) rtFullT = now; } else rtFullT = 0;
-    if (rtShow > .001 || (photoReady && now - rtOffT < 350)) { camera.updateMatrixWorld(); RT.render(camera, tmpP, tmpT, pS, now); }      // (and while it fades out to the photo)
+    if (lsCompose && (rtShow > .001 || (photoReady && now - rtOffT < 350))) { camera.updateMatrixWorld(); RT.render(camera, tmpP, tmpT, pS, now); }      // (and while it fades out to the photo)
     const T4 = T0 && performance.now();
     const covered = rtShow >= .999;                            // the live layer over this canvas: nothing to draw under it
     plateOn = shown; const ps_ = pl === "stale" ? "stale" : shown ? "1" : "0"; if (stage.dataset.photo !== ps_) stage.dataset.photo = ps_;
@@ -956,10 +1028,12 @@
     if (shown && photoEase > .98) photoEase = 1;
     if (liveEase < 0) liveEase = want;
     liveEase += (want - liveEase) * Math.min(1, dt * 4); if (Math.abs(want - liveEase) < .02) liveEase = want;
-    hideOv = want < .999 && (!shown || plateHeld);             // no photo yet, or one held from a nearby view: no glows or labels
-    if (shown && loadEl) loadEl.classList.add("done");
-    if (!covered) compose(liveEase, !hideOv);
-    if (covered !== wasCovered) { wasCovered = covered; canvas.style.visibility = covered ? "hidden" : ""; }   // under the live layer this canvas leaves the compositor
+    hideOv = !lsCompose || (want < .999 && (!shown || plateHeld));   // no photo yet, or one held from a nearby view (or the arrival): no glows or labels
+    if (shown && loadEl && !LS) loadEl.classList.add("done");
+    if (LS && !lsShown) lsStep(now);
+    if (!covered && lsCompose) compose(liveEase, !hideOv);      // (hidden behind the arrival scene: nothing drawn until it reveals)
+    // (under the live layer this canvas is simply not drawn; it stays in the compositor: hiding and re-showing it rebuilt
+    // its layer, a 40-140 ms hitch at the x-ray's ends)   // under the live layer this canvas leaves the compositor
     if (T0) window.__kdT.push([T1 - T0, T3 - T2, T4 - T3, performance.now() - T4, performance.now() - now, now, pS * 1000, rtShow * 1000, introV * 1000]);   // diagnostics: feed, plate, live layer, compose, whole update
     if (window.__kdDiag) window.__kdDiag.push([now, pS, rtShow, covered ? 1 : 0, pl === "stale" ? 2 : pl ? 1 : 0, lastPair ? lastPair[0] : -1]);   // diagnostics
 
@@ -969,4 +1043,5 @@
     hudBtns.forEach((b, i) => b.classList.toggle("on", pS >= STARTS[i] - .001 && pS < ENDS[i] + (i === 3 ? 1 : 0)));
   }
   tick();
+  window.__lsArmed = true;                              // (js/home.js: the arrival is in hand)
 })();

@@ -8,7 +8,7 @@
   const T = THREE, A = "assets/rt/";
   const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
   const smooth = (v, a, b) => { const t = clamp((v - a) / (b - a)); return t * t * (3 - 2 * t); };
-  const K = window.KDRT = { ready: false, loading: false, failed: false, still: true };
+  const K = window.KDRT = { ready: false, loading: false, failed: false, still: true, progress: 0, budget: 4 };   // progress 0..1 (downloads, then set-up)
   let canvas = null, renderer = null, scene = null, post = null, postScene = null, postCam = null, rt = null, W = 1, H = 1;
   let CU, KU, TU, slatU, G, fanC, interior = [], slats = [], geo = null, screwM = null, shown = -1;
 
@@ -16,8 +16,10 @@
     canvas = document.createElement("canvas"); canvas.className = "rt-layer"; canvas.setAttribute("aria-hidden", "true");
     after.after(canvas);
   };
+  let sizedW = 0, sizedH = 0;
   K.resize = (w, h) => {
-    W = w; H = h; if (!renderer) return;
+    W = w; H = h; if (!renderer || (w === sizedW && h === sizedH)) return;   // (a hidden stage reports the same size: the buffers stay)
+    sizedW = w; sizedH = h;
     renderer.setSize(w, h, false); if (rt) { rt.dispose(); rt = null; } if (rtLow) { rtLow.dispose(); rtLow = null; }
   };
   // the drawing buffers, made when needed and released after a few idle seconds (they are most of the GPU memory it holds)
@@ -32,7 +34,7 @@
   K.show = (v, fade) => {
     if (!canvas || v === shown) return; const up = v > shown; shown = v;
     canvas.style.transition = !fade ? "none" : up ? "opacity .08s linear, visibility 0s" : "opacity .25s ease-out, visibility 0s .25s"; canvas.style.opacity = v.toFixed(3);
-    canvas.style.visibility = v > 0 ? "visible" : "hidden";             // (a hidden layer costs the compositor nothing)
+    canvas.style.visibility = "visible";            // (always in the compositor at opacity 0: hiding and re-showing it rebuilt its layer, a hitch)
   };
   let ctrl = null;
   K.pause = () => { if (ctrl && !K.ready) ctrl.abort(); };           // stops the downloads (K.load starts them again)
@@ -45,13 +47,25 @@
   async function build() {
     // everything is downloaded first (low priority, cancellable) and decoded off the main thread; nothing is made until then
     ctrl = new AbortController(); const opt = { signal: ctrl.signal, priority: "low" };
-    const get = u => fetch(u, opt).then(r => { if (!r.ok) throw new Error(u); return r; });
-    const json = u => get(u).then(r => r.json()), bin = u => get(u).then(r => r.arrayBuffer());
-    const bitmapOf = (u, flip = true) => get(u).then(r => r.blob())
+    // progress by bytes as they come in (one file is most of the layer: counted by files, the readout would sit still);
+    // the sizes are known once each reply starts, and the textures asked for second are reckoned at 15% until then
+    let asked = 0, heard = 0, exp1 = 0, exp2 = 0, gotB = 0, wave2 = false;
+    const prog = () => { if (heard < asked) return; const exp = wave2 ? exp1 + exp2 : exp1 * 1.15; if (exp > 0) K.progress = Math.max(K.progress, .7 * Math.min(1, gotB / exp)); };
+    const get = u => { asked++; return fetch(u, opt).then(r => { if (!r.ok) throw new Error(u); return r; }); };
+    const read = async r => {           // the body as a Blob, counted chunk by chunk
+      const n = +r.headers.get("content-length") || 0; heard++; if (wave2) exp2 += n; else exp1 += n;
+      if (!r.body || !n) { const b = await r.blob(); gotB += n; prog(); return b; }
+      const rd = r.body.getReader(), parts = []; let seen = 0;
+      for (;;) { const { done, value } = await rd.read(); if (done) break; parts.push(value); const add = Math.min(value.length, n - seen); if (add > 0) { seen += add; gotB += add; prog(); } }
+      if (seen < n) { gotB += n - seen; prog(); }        // (a compressed reply: its length is what came over the wire)
+      return new Blob(parts);
+    };
+    const json = u => get(u).then(read).then(b => b.text()).then(JSON.parse), bin = u => get(u).then(read).then(b => b.arrayBuffer());
+    const bitmapOf = (u, flip = true) => get(u).then(read)
       .then(b => createImageBitmap(b, { premultiplyAlpha: "none", colorSpaceConversion: "none", imageOrientation: flip ? "flipY" : "none" }));
     const [g, buf, bake, cmeta, envBuf, lutImg] = await Promise.all([json(A + "rt_geo.json"), bin(A + "rt_geo.bin"), json(A + "rt_meta.json"),
       json("assets/models/crm-meta.json"), bin(A + "rt_env.bin"), bitmapOf(A + "rt_lut.png", false)]);
-    const names = Object.keys(bake), ambNames = names.filter(k => bake[k].arange);
+    const names = Object.keys(bake), ambNames = names.filter(k => bake[k].arange); wave2 = true;
     const [bms, abms, pbm] = await Promise.all([Promise.all(names.map(k => bitmapOf(A + `rt_${k}.webp`))), Promise.all(ambNames.map(k => bitmapOf(A + `rt_${k}_amb.webp`))),
       bitmapOf("assets/render/pano.jpg")]);
     // the making happens in a few stages, each on a screen update when the reader is not scrolling
@@ -294,7 +308,7 @@
       depthTest: false, depthWrite: false });
     postScene = new T.Scene(); postCam = new T.Camera(); postScene.add(new T.Mesh(new T.PlaneGeometry(2, 2), post));
     K.resize(W, H); ensureRT();
-    setInterval(() => { if (performance.now() - lastUse > 4000) { if (rt) { rt.dispose(); rt = null; } if (rtLow) { rtLow.dispose(); rtLow = null; } } }, 2000);
+    // (the drawing buffers are kept: re-making them on the first live frame after an idle spell would cost a hitch)
 
     // warm-up, one part at a time: its geometry goes up and its shader compiles, so the first live frame costs nothing
     const wc = new T.PerspectiveCamera(30, W / H, .05, 900); wc.position.set(25.2, 4.25, 3.1); wc.lookAt(28.6, 4.6, 6.3); wc.updateMatrixWorld();
@@ -318,11 +332,14 @@
       ensureRT(); renderer.setRenderTarget(rt); renderer.render(scene, wc); renderer.setRenderTarget(null); m.frustumCulled = fc; return true;
     });
     jobs.push(() => { for (const o of meshes) o.visible = true; renderer.initTexture(lut); ensureRT(); post.uniforms.tHDR.value = rt.texture; renderer.render(postScene, postCam); return true; });
+    jobs.push(() => { ensureLow(); renderer.setRenderTarget(rtLow); renderer.clear(); renderer.setRenderTarget(null); return true; });   // (the fast-flick buffer too)
     // the jobs run while the reader is not scrolling, a few milliseconds' worth per screen update
+    const J0 = jobs.length;
     await new Promise(done => {
       const step = () => {
         if (!jobs.length) { done(); return; }
-        if (K.still) { const t0 = performance.now(); while (jobs.length && performance.now() - t0 < 4) { const j0 = performance.now(), r = jobs[0](), jd = performance.now() - j0;
+        K.progress = Math.max(K.progress, .7 + .3 * (1 - jobs.length / J0));
+        if (K.still) { const t0 = performance.now(); while (jobs.length && performance.now() - t0 < (K.budget || 4)) { const j0 = performance.now(), r = jobs[0](), jd = performance.now() - j0;
           if (jd > 6) (K.slow = K.slow || []).push([Math.round(jd), String(jobs[0]).slice(0, 60)]); if (r === WAIT) break; if (r) jobs.shift(); } }
         requestAnimationFrame(step);
       };

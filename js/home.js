@@ -22,9 +22,39 @@ function chapterCard(p, n) {
   </div>`;
 }
 
+/* The arrival scene (css/intro.css): on wherever the 3D flight runs. While it loads, a conformal approach HUD over the
+   hero's dusk sky; js/scene.js brings the aircraft in only once everything is loaded. Lights, runway and HUD as markup. */
+const LS = !!window.THREE && !matchMedia("(prefers-reduced-motion: reduce)").matches;
+function lsLayers() {
+  const lt = (x, y, s, cls = "") => `<i class="ls-lt ${cls}" style="left:calc(${x.toFixed(3)} * var(--hu));top:calc(${y.toFixed(3)} * var(--hu));--s:${s.toFixed(3)}"></i>`;
+  const TH = 7.2, HW = 4.4;                           // threshold 7.2 HUD units below the horizon (3 deg), runway half-width; far end 4x as far
+  let edges = "";
+  for (let i = 0; i < 16; i++) { const k = 1 / (1 + 3 * i / 15); edges += lt(-HW * k, TH * k, Math.max(.12, .3 * k), "dim") + lt(HW * k, TH * k, Math.max(.12, .3 * k), "dim"); }
+  let thr = ""; for (let j = 0; j < 11; j++) thr += lt(-4.6 + j * .92, TH, .34, "g");
+  const papi = [0, 1, 2, 3].map(j => `<span class="p${j + 1}">${lt(-8.4 + j * .62, TH * .88, .44, "w")}${lt(-8.4 + j * .62, TH * .88, .44, "r")}</span>`).join("");
+  const rowK = t => 1 / (1.1765 - 1.0227 * t);       // the curve of @keyframes ls-row (the rows' resting layout)
+  const rows = Array.from({ length: 8 }, (_, i) => {
+    let h = ""; for (let j = -2; j <= 2; j++) h += lt(j * 1.0, TH, j ? .32 : .38);
+    if (i % 3 === 0) for (const sd of [-1, 1]) h += lt(sd * 3.2, TH, .3, "a") + lt(sd * 3.8, TH, .3, "a");
+    return `<div class="ls-anc ls-row" style="left:0;top:0;--i:${i};--k0:${rowK(.08 + i * .11).toFixed(3)};--o0:${(i < 7 ? 1 - i * .1 : 0).toFixed(2)}">${h}</div>`;
+  }).join("");
+  const rwy = `<svg class="ls-rwy-svg" viewBox="-8 0 16 9" preserveAspectRatio="none" aria-hidden="true"><path d="M${-HW} ${TH}L${-HW / 4} ${TH / 4}H${HW / 4}L${HW} ${TH}Z" fill="none" stroke="rgba(238,241,245,.18)" stroke-width="1" vector-effect="non-scaling-stroke"/></svg>`;
+  const fpm = `<svg viewBox="-20 -11 40 20" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="0" cy="0" r="4.6" vector-effect="non-scaling-stroke"/><path d="M-4.6 0H-14M4.6 0H14M0 -4.6V-9.6" vector-effect="non-scaling-stroke"/></g></svg>`;
+  const R = "assets/render/";
+  return [`<div class="ls-cam ls-bank ls-only" aria-hidden="true"><div class="ls-cam ls-bob"><div class="ls-cam ls-push">
+      <div class="ls-pic ls-plate"><img src="${R}bg/f00000.webp" alt="" decoding="async"></div>
+      <div class="ls-anc ls-ground"><div class="ls-anc ls-rwy" style="left:0;top:0">${rwy}${edges}${thr}<span class="ls-papi">${papi}</span>${rows}</div></div>
+      <div class="ls-pic ls-craft"><img src="${R}m/f00000.webp" alt="" decoding="async"></div>
+      <div class="ls-pic ls-photo"><img src="${R}f00000.webp" alt="" decoding="async"></div>
+      <div class="ls-anc ls-conf"><span class="ls-hz l"></span><span class="ls-hz r"></span><span class="ls-lad l"></span><span class="ls-lad r"></span></div>
+    </div></div></div>`,
+    `<div class="ls-anc ls-hud ls-only" aria-hidden="true"><div class="ls-box"><i></i><i></i><i></i><i></i></div><div class="ls-fpm"><div class="ls-fpm-f">${fpm}</div></div></div>`];
+}
+
 function homeHTML(d) {
   const tick = d.marquee.map(m => `<span>${esc(m)}</span><i aria-hidden="true">\u2726</i>`).join("");
   const [p1, p2] = d.projects;
+  const [lsCams, lsHud] = LS ? lsLayers() : ["", ""];
   return `
 <header class="nav" id="nav"><div class="nav-in">
   <a class="brand" href="#" data-goto="top"><span class="brand-mark" aria-hidden="true"></span>K. Dwivedi</a>
@@ -34,10 +64,12 @@ function homeHTML(d) {
 </div><div class="progress" aria-hidden="true"><i id="progress"></i></div></header>
 
 <section class="flight" id="top">
-  <div class="flight-stage" id="flight-stage">
+  <div class="flight-stage${LS ? " ls" : ""}" id="flight-stage">
     <div class="sky" aria-hidden="true"></div>
     <div class="sky-photo" aria-hidden="true"><img src="assets/render/f00000.webp" alt=""></div>
+    ${lsCams}
     <canvas id="wing" aria-label="3D model of the NASA Common Research Model airliner in high-lift configuration: a scan plane cuts the skin away to show LPBF slat-track cans behind the front spar, then a bird strikes the outboard slat"></canvas>
+    ${lsHud}
     <div class="flight-scrim" aria-hidden="true"></div>
     <span class="pin" id="pin-can" aria-hidden="true"><span>Track can \u00b7 ${esc(p1.tags[0].replace(" / ", " "))}</span></span>
     <span class="pin" id="pin-hit" aria-hidden="true"><span>${esc(p2.tags[1])}</span></span>
@@ -57,7 +89,7 @@ function homeHTML(d) {
       ${d.stats.map(s => `<div class="stat"><span class="stat-v">${esc(s.v)}</span><span class="stat-l">${esc(s.l)}</span></div>`).join("")}
     </div></div></div>
     <nav class="flight-hud" aria-label="Story chapters">${["Approach", "Slat track", "Bird strike", "The numbers"].map((l, i) => `<button type="button" class="hud-step" data-chapter="${i}"><i><b></b></i><span>${l}</span></button>`).join("")}</nav>
-    <div class="scene-load" id="scene-load" aria-hidden="true"><span>Loading aircraft</span><i></i></div>
+    <div class="scene-load" id="scene-load" aria-hidden="true"><span>Loading aircraft <b></b></span><i></i></div>
   </div>
 </section>
 
@@ -231,3 +263,19 @@ function homeHTML(d) {
 
 document.getElementById("app").innerHTML = homeHTML(D);
 wireCommon(document.getElementById("app"));
+if (LS) {   // the arrival: the page starts on the hero and stays there until js/scene.js has the aircraft in
+  // (a link to a section starts there instead, free to scroll; a project link opens it over the hero)
+  const deep = location.hash.length > 1 && location.hash !== "#top", proj = /^#project-/.test(location.hash);
+  if (!deep) { try { history.scrollRestoration = "manual"; } catch (e) {} scrollTo(0, 0); }
+  if (!deep || proj) document.documentElement.classList.add("ls-lock");
+  // never held by a scene.js that did not load or start: then the plain hero, free to scroll
+  setTimeout(() => { if (window.__lsArmed) return; document.documentElement.classList.remove("ls-lock"); document.documentElement.classList.add("no-3d"); document.getElementById("flight-stage").classList.remove("ls"); }, 12000);
+  addEventListener("click", e => { if (e.target.closest("[data-goto], [data-open], a[href]")) document.documentElement.classList.remove("ls-lock"); }, true);
+  const st = document.getElementById("flight-stage");
+  // a scene picture that fails: never its broken-image frame (and with no cut-out, the photo comes in at once)
+  st.querySelectorAll(".ls-pic img").forEach(im => { const bad = () => { im.parentNode.classList.add("broken"); if (im.closest(".ls-craft")) st.classList.add("no-craft"); };
+    if (im.complete && !im.naturalWidth) bad(); else im.addEventListener("error", bad); });
+  const fonts = document.fonts ? Promise.all(['600 100px "Inter Tight"', '500 26px "Inter Tight"', '500 12px "JetBrains Mono"', '500 15px Inter'].map(f => document.fonts.load(f))).catch(() => {}) : Promise.resolve();
+  window.__lsFonts = false; fonts.then(() => { window.__lsFonts = true; });
+  Promise.race([fonts, new Promise(r => setTimeout(r, 700))]).then(() => st.classList.add("go"));   // the intro text rises (never later than 0.7 s)
+}
