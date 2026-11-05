@@ -270,3 +270,7 @@
 .award .fig-btn { width: 150px; border-radius: 10px; }
 .det-in > *, .cite > * { min-width: 0; max-width: 100%; }
 .cite p, .pub-venue, .pub-links a, .mail span { overflow-wrap: anywhere; }
+
+/* Four CV roles, paired on desktop and stacked on smaller screens. */
+.tools.experience-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 700px) { .tools.experience-grid { grid-template-columns: minmax(0, 1fr); } }
