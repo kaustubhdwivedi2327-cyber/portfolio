@@ -15,22 +15,22 @@ const SITE = {
   first: "Kaustubh",
   last: "Dwivedi",
   role: "Aerospace Structures & Design Engineer",
-  location: "Cranfield, UK",
+  location: "Milton Keynes, UK",
   email: "kaustubhdwivedi2327@gmail.com",
   linkedin: "https://www.linkedin.com/in/kaustubh-dwivedi-65586324a/",
   researchgate: "https://www.researchgate.net/scientific-contributions/Kaustubh-Dwivedi-2272720523",
   orcid: "https://orcid.org/0009-0004-6472-7732",
-  cv: "assets/Kaustubh_Dwivedi_CV.pdf",
+  cv: "assets/Kaustubh_Dwivedi_CV.pdf?v=20261105",
   headline: ["Structures that are", "substantiated,", "not just designed."],
   profile:
-    "Aerospace structures and design engineer, completing an MSc in Advanced Lightweight and Composite Structures at Cranfield University. Two industry projects with GKN Aerospace: an LPBF redesign of the Airbus A320 slat-track can, taken from load definition to released native CAD 20.6 % lighter than the existing welded design, and an SPH\u2013FEA bird-strike assessment of composite leading-edge concepts, validated against manufactured specimens and published open access in 2026. Five peer-reviewed publications, including a first-author paper in Materials Today Communications.",
+    "Aerospace structures and design engineer based in Milton Keynes, with an MSc in Advanced Lightweight and Composite Structures from Cranfield University and a weighted average of 78.83 %. Two industry projects with GKN Aerospace: an LPBF redesign of the Airbus A320 slat-track can, 20.6 % lighter than the existing welded design, and leadership of a four-person composite leading-edge bird-strike project combining SPH\u2013FEA with impact testing and correlation studies. Industry experience includes FRP tank design at Mohan Enviro Engineering and a concept-to-prototype gearbox placement with Dassault Syst\u00e8mes. Five peer-reviewed publications, including a first-author paper in Materials Today Communications.",
   stance:
     "I work to a stated load basis and a documented evidence chain, and I am explicit about what a result clears and what it does not.",
-  availability: "Open to UK aerospace structures, design and analysis roles from Sept 2026.",
+  availability: "Open to UK aerospace structures, design and analysis roles.",
   stats: [
     { value: 2, suffix: "", decimals: 0, label: "industry projects with GKN Aerospace: A320 slat-track can and composite leading edge" },
     { value: 5, suffix: "", decimals: 0, label: "peer-reviewed publications, one as first author" },
-    { value: 18, suffix: "", decimals: 0, label: "months of industry design experience at Dassault Syst\u00e8mes" },
+    { value: 78.83, suffix: "%", decimals: 2, label: "weighted MSc average at Cranfield University" },
     { value: 100, suffix: "+", decimals: 0, label: "documented simulation runs in Abaqus, Tosca and ANSYS across the two projects" },
   ],
   marquee: [
@@ -65,7 +65,7 @@ const PROJECTS = [
     category: "Structures & AM",
     title: "Airbus A320 Slat-Track Can",
     subtitle: "LPBF redesign and structural substantiation",
-    period: "2025 \u2013 2026",
+    period: "May 2026 \u2013 Sept 2026",
     org: "Supervised and reviewed by GKN Aerospace \u00b7 MSc research project, Cranfield University",
     role: "Sole engineer, load definition to released CAD",
     tags: ["LPBF / AlSi10Mg", "Abaqus", "CATIA V5", "Tosca", "nCode", "ANSYS Additive", "CS 25.963 / 25.561", "DfAM"],
@@ -73,10 +73,10 @@ const PROJECTS = [
       { value: "1.478 kg", label: "released monolithic design" },
       { value: "\u221220.6 %", label: "vs. 1.860 kg welded 6061-T6 reference" },
       { value: "5.56", label: "minimum yield FoS, PEEQ = 0" },
-      { value: "3.82\u00d7", label: "fatigue margin on the 300k-repeat target" },
+      { value: "3.82\u00d7", label: "welded-reference fatigue margin on the 300k-repeat target" },
     ],
     summary:
-      "Slat-track cans enclose the part of the leading-edge slat mechanism that enters the wing fuel tank, keeping the fuel boundary while leaving clearance for the track. I replaced a multi-part welded 6061-T6 can with a single AlSi10Mg laser powder-bed fusion part and substantiated it end to end: load basis, route down-selection across four AM materials, load-path optimisation, response-guided variable-wall sizing, native CATIA reconstruction, independent re-verification, fatigue, modal and build-process screens, closed out against a requirements verification matrix.",
+      "Slat-track cans enclose the part of the leading-edge slat mechanism that enters the wing fuel tank, keeping the fuel boundary while leaving clearance for the track. I redesigned a multi-part welded 6061-T6 can as a single AlSi10Mg laser powder-bed fusion part, covering load definition, manufacturing-route screening, load-path optimisation, variable-wall sizing, native CATIA reconstruction and independent-mesh verification. Separate fatigue screening assessed the existing welded assembly. A requirements verification matrix recorded outstanding material-data, buckling and leak/proof-test requirements for the LPBF candidate.",
     highlights: [
       "Released a monolithic AlSi10Mg LPBF design at 1.478 kg in place of a multi-part welded 6061-T6 assembly, removing 20.6 % of the mass with all five load cases elastic and a minimum yield factor of safety of 5.56.",
       "Quantified what the redesign actually bought: at a fixed 1.450 kg, redistributing wall material alone cut displacement 3.4\u20135.1 % and von Mises stress 3.7\u201310.1 %, and a uniform 1.50 mm wall of comparable mass yielded locally where the variable wall stayed elastic.",
@@ -211,9 +211,9 @@ const PROJECTS = [
     category: "Composites & Impact",
     title: "Composite Wing Leading Edge",
     subtitle: "Bird-strike concept assessment with SPH\u2013FEA",
-    period: "2025 \u2013 2026",
+    period: "Jan 2026 \u2013 May 2026",
     org: "GKN Aerospace / Cranfield University \u00b7 industry-linked group design project",
-    role: "Technical lead",
+    role: "Team lead, four-person project",
     tags: ["Abaqus/Explicit", "SPH\u2013FEA", "Johnson\u2013Cook", "Hashin damage", "CFRP / GFRP / Kevlar", "Nomex & Al honeycomb", "Test correlation"],
     metrics: [
       { value: "JMMP 2026", label: "published open access, J. Manuf. Mater. Process. 10(9), 343" },
@@ -225,21 +225,21 @@ const PROJECTS = [
       { label: "Published paper \u00b7 Journal of Manufacturing and Materials Processing 2026, 10(9), 343 (open access)", href: "https://doi.org/10.3390/jmmp10090343" },
     ],
     summary:
-      "Bird strike is a certification-critical event for wing leading edges. I led the numerical side of a GKN-linked group project that ranked monolithic AA2024-T3, CFRP, GFRP and Kevlar/epoxy skins and six sandwich configurations with Nomex and aluminium honeycomb cores under the same 1.8 kg SPH bird at 90 and 180 m/s, in Abaqus/Explicit, and validated the modelling approach against published tests and specimens we manufactured and impact-tested ourselves.",
+      "Bird strike is a certification-critical event for wing leading edges. I led a four-person GKN-linked project, allocating tasks, monitoring deadlines and coordinating simulation and testing. We ranked monolithic AA2024-T3, CFRP, GFRP and Kevlar/epoxy skins and sandwich configurations with Nomex and aluminium honeycomb cores under the same 1.8 kg SPH bird at 90 and 180 m/s in Abaqus/Explicit. Alongside comparisons with published benchmarks, I conducted impact tests on composite and honeycomb sandwich panels at Cranfield Impact Centre and investigated correlation with the bird-strike simulations.",
     highlights: [
       "Published as Lalehparvar, Nuttall, Bavaria, Mass\u00f3 Etxeberria, Dwivedi, Ghasemnejad, Coladas Mato and van de Waerdt (2026), Comparative SPH\u2013Finite Element Assessment of Aerospace Material Systems Under Bird-Strike Loading, Journal of Manufacturing and Materials Processing 10(9), 343, with GKN Aerospace and Fokker co-authors.",
       "Ranked five concept families, CFRP, GFRP, Kevlar/epoxy, honeycomb sandwich and metallic, under common loading using Abaqus/Explicit SPH\u2013FEA at 90 and 180 m/s on deformation, peak force, stress distribution and energy absorption.",
-      "Validated the models against published data and against specimens the team manufactured and tested, working closely with teammates to reconcile simulation and test results until the whole group could trust the conclusions.",
+      "Conducted impact tests on composite panels and honeycomb sandwich panels at Cranfield Impact Centre and investigated correlation with bird-strike simulations, documenting modelling limitations alongside the comparisons with published data.",
       "Converted the analysis into design recommendations, weighing laminate behaviour and manufacturability alongside impact performance.",
     ],
     steps: [
       { title: "Geometry", image: "assets/bird-strike/t01_le_geometry.jpg", imageCaption: "Leading-edge surface generated from the NACA 23015 profile: 900 mm span, 600 mm depth, 535 mm height, 5 mm skin (thesis Fig. 3.2).", body: "500 \u00d7 500 mm flat panels for screening and validation, then the forward 600 mm of a NACA 23015 section over a 900 mm span, 535 mm high, with 5 mm skins. Same profile as the A320 family, so the curvature and load paths are representative." },
       { title: "Bird model", image: "assets/bird-strike/t04_bird_capsule.jpg", imageCaption: "Hemispherical-ended capsule SPH bird, 226 \u00d7 113 mm, 1.8 kg (Fig. 3.6).", body: "1.8 kg capsule-shaped SPH bird with a Mie\u2013Gr\u00fcneisen equation of state (\u03c1\u2080 = 950 kg/m\u00b3, c\u2080 = 1482.96 m/s, s = 2, \u0393\u2080 = 0), 41,052 particles converted from C3D8R elements, fired at 90 and 180 m/s." },
       { title: "Materials", image: "assets/bird-strike/t03_honeycomb_workflow.jpg", imageCaption: "Honeycomb-core modelling workflow: flat sheet wrapped to the leading-edge curvature (Fig. 3.4).", body: "Johnson\u2013Cook plasticity for AA2024-T3; Hashin progressive damage for T700/M21 CFRP, GFRP and Kevlar/epoxy laminates; Nomex and AL5052 honeycomb cores as orthotropic shells wrapped to the leading-edge curvature." },
-      { title: "Validation", image: "assets/bird-strike/t09_al_force_validation.jpg", imageCaption: "Aluminium flat-panel force history against the Liu et al. experiment and simulation (Fig. 4.1).", body: "Aluminium flat-panel force\u2013time and deformation\u2013time histories checked against the Liu et al. experiment and simulation; CFRP/Nomex sandwich checked against Zheng et al.; manufactured CFRP, Nomex-core and aluminium-core specimens tested on the drop tower and compared with the same models." },
+      { title: "Benchmarks and test correlation", image: "assets/bird-strike/t09_al_force_validation.jpg", imageCaption: "Aluminium flat-panel force history against the Liu et al. experiment and simulation (Fig. 4.1).", body: "Aluminium flat-panel force\u2013time and deformation\u2013time histories checked against the Liu et al. experiment and simulation; CFRP/Nomex sandwich checked against Zheng et al. Manufactured composite and honeycomb sandwich specimens were impact-tested at Cranfield Impact Centre to investigate correlation with the bird-strike simulations." },
       { title: "Simulation matrix", image: "assets/bird-strike/t07_meshed_le_bird.jpg", imageCaption: "Meshed leading edge with the SPH bird at the impact location (Fig. 3.10).", body: "Six flat-panel and ten leading-edge configurations, each at 90 and 180 m/s: 32 production runs on a 2.5 mm mesh chosen from a 20 \u2192 2.5 mm sensitivity study (201,799 nodes on the leading edge)." },
       { title: "Findings", image: "assets/bird-strike/t23_gfrp_nomex_180.jpg", imageCaption: "GFRP/Nomex sandwich leading edge at 180 m/s: von Mises in the outer skin and with the skin hidden (Fig. 6.10).", body: "Stiffness controls deformation but not force: CFRP deformed least, GFRP deformed most and absorbed the most energy, Kevlar sat between. Nomex cores lowered peak force slightly; aluminium cores stored more energy per unit mass. No single material won every metric, and every selected thickness kept its structural integrity at both speeds." },
-      { title: "Coordination", body: "Task allocation, deadline tracking, integration of teammates' analysis and test inputs, and presentation of recommendations at project reviews." },
+      { title: "Coordination", body: "Led a four-person team: task allocation, deadline tracking, coordination of simulation and testing, and presentation of design-review recommendations covering laminate behaviour, manufacturing trade-offs and modelling limitations." },
     ],
     cover: "assets/bird-strike/cover.jpg",
     hero: "assets/bird-strike/hero.jpg",
@@ -353,12 +353,12 @@ const PROJECTS = [
     category: "Design & CAD",
     title: "Modular Multi-Ratio Gearbox",
     subtitle: "Concept to working prototype",
-    period: "Dec 2022 \u2013 May 2024",
+    period: "Dec 2022 \u2013 Dec 2023",
     org: "Engineering Design Intern \u00b7 La Fondation Dassault Syst\u00e8mes ConnectNext Industry Internship Programme 2022\u201323 / Dassault Syst\u00e8mes, Pune",
-    role: "18-month industry placement",
+    role: "Engineering Design Intern",
     tags: ["CATIA V5", "3DEXPERIENCE", "Abaqus", "Hand calculation", "Prototyping", "Design review"],
     metrics: [
-      { value: "18 mo", label: "industry placement" },
+      { value: "3", label: "design constraints: force transmission, packaging and manufacturability" },
       { value: "Prototype", label: "built and working" },
     ],
     summary:
@@ -475,10 +475,10 @@ const COURSES_NOTE = "Official Dassault Syst\u00e8mes training completed through
 const SKILLS = [
   { title: "Finite element", body: "Abaqus/Standard and /Explicit: shell and solid modelling, geometric and material nonlinearity, contact and tie constraints, SPH impact, mesh sensitivity studies, verification against an independent mesh, simulation\u2013test correlation." },
   { title: "Optimisation & AM", body: "Tosca Structure (bead and shape), ANSYS Additive thermal simulation; DfAM: wall thickness, build orientation, support strategy, process risk." },
-  { title: "CAD & release", body: "CATIA V5 and 3DEXPERIENCE: part, assembly and multi-section surface modelling, native solid reconstruction, STEP exchange, geometry validation and design documentation." },
-  { title: "Composites", body: "Laminate and sandwich design, stacking sequence definition, specimen manufacture, mechanical and impact testing, damage and delamination modelling." },
+  { title: "CAD & release", body: "CATIA V5, including the Composite Design workbench, and 3DEXPERIENCE: part, assembly and surface modelling, native solid reconstruction, STEP exchange, assembly drawings, bills of materials and design documentation. FRP tank design, wall-thickness and laminate selection." },
+  { title: "Composites", body: "Laminate and sandwich design, stacking sequences, hand lay-up, curing, specimen manufacture, polymer compression testing, impact testing and experimental data interpretation." },
   { title: "Standards & method", body: "CS 25.963 and CS 25.561 load definitions; EN 1999-1-3 fatigue curves; nCode; requirements verification matrices and evidence chains." },
-  { title: "Programming", body: "Python for post-processing, mesh and field-data handling and figure generation; MATLAB; Excel." },
+  { title: "Programming & data", body: "Python for post-processing, mesh and field-data handling and figure generation; MATLAB; Excel. Particle swarm optimisation of Random Forest and XGBoost models to predict lattice mechanical performance from experimental manufacturing parameters." },
 ];
 
 const EDUCATION = [
@@ -486,13 +486,13 @@ const EDUCATION = [
     degree: "MSc Advanced Lightweight and Composite Structures",
     school: "Cranfield University",
     period: "Sept 2025 \u2013 Sept 2026",
-    body: "Accredited by RAeS and IMechE for further learning toward CEng registration. Composite structures, finite element methods, structural stability, impact mechanics.",
+    body: "Completed September 2026 with a weighted average of 78.83 %. Relevant study: composite structures, finite element analysis, structural stability and impact mechanics. Accredited by RAeS and IMechE for further learning toward CEng registration.",
     note: "Thesis: Slat Track Cans of the Future \u2014 Exploring the Design Space of a High Criticality Fuel-Tank Component.",
   },
   {
     degree: "B.Tech Mechanical Engineering",
     school: "Symbiosis Institute of Technology, Pune",
-    period: "2020 \u2013 2024",
+    period: "July 2020 \u2013 July 2024",
     body: "CGPA 8.36 / 10.",
     note: "",
   },
@@ -583,7 +583,7 @@ const PUBLICATIONS = [
 ];
 
 const MEMBERSHIPS = [
-  "UK Graduate Route eligible on MSc completion. Open to UK relocation, hybrid working and travel to client or manufacturing sites.",
+  "Open to UK relocation, hybrid working and travel to client or manufacturing sites.",
 ];
 
 // About block and timeline. `photo` is a 4:5 portrait; facts are [label, value] pairs.
@@ -591,39 +591,41 @@ const ABOUT = {
   title: "An engineer who shows the evidence.",
   photo: "assets/portrait.jpg",
   lead:
-    "I am an aerospace structures engineer finishing my MSc at Cranfield University. I do not treat CAD, simulation and testing as separate tasks: a design is not finished for me until the model, the manufacturing constraints and the test evidence agree, and I say plainly when they do not. I am the person on a team who wants to understand why something works before trusting it, who keeps the plan and the documentation straight so others can pick up my work, and who takes feedback from more experienced engineers as the fastest way to get better. I have coordinated the technical work of a student team, worked to an industrial review cadence and published with co-authors, and what I want next is a UK structures, design or analysis role where I can learn from experienced engineers and be useful from the first week.",
+    "My curiosity about machines has grown into an interest in aircraft structures and making them lightweight without compromising strength. I completed my MSc in Advanced Lightweight and Composite Structures at Cranfield University in September 2026, with a weighted average of 78.83 %. My experience spans aircraft component development, composite manufacturing and impact testing, FRP tank design at Mohan Enviro Engineering, and a concept-to-prototype gearbox placement with Dassault Syst\u00e8mes. I enjoy using simulation alongside physical testing to understand how structures behave and make better design decisions. I have led a four-person project team, incorporated senior-engineer review feedback and published with co-authors, and I am looking for a UK structures, design or analysis role.",
   facts: [
-    ["Based", "Cranfield, UK"],
-    ["Status", "MSc Advanced Lightweight and Composite Structures, completing Sept 2026"],
+    ["Based", "Milton Keynes, UK"],
+    ["Status", "MSc completed Sept 2026; weighted average 78.83 %"],
     ["Looking for", "UK aerospace structures, design and analysis roles"],
     ["Working style", "Stated load basis, independent verification, clear close-out"],
   ],
   timeline: [
-    { year: "2020", title: "B.Tech Mechanical Engineering begins", org: "Symbiosis Institute of Technology, Pune" },
-    { year: "Dec 2022", title: "Engineering Design Intern, 18-month placement", org: "La Fondation Dassault Syst\u00e8mes / Dassault Syst\u00e8mes, Pune" },
+    { year: "July 2020", title: "B.Tech Mechanical Engineering begins", org: "Symbiosis Institute of Technology, Pune" },
+    { year: "Dec 2022\u2013Dec 2023", title: "Engineering Design Intern", org: "La Fondation Dassault Syst\u00e8mes / Dassault Syst\u00e8mes, Pune" },
+    { year: "Dec 2023\u2013Apr 2024", title: "Mechanical Design Engineer: FRP tanks", org: "Mohan Enviro Engineering Pvt Ltd, Ghaziabad" },
     { year: "2024", title: "First-author paper and three CRC Press chapters; B.Tech completed", org: "Materials Today Communications; CRC Press" },
     { year: "Sept 2025", title: "MSc Advanced Lightweight and Composite Structures", org: "Cranfield University" },
-    { year: "2025\u201326", title: "Two projects with GKN Aerospace", org: "A320 slat-track can LPBF redesign; composite leading-edge bird strike" },
-    { year: "Sept 2026", title: "Bird-strike work published in JMMP; MSc completes", org: "Open to UK roles" },
+    { year: "Jan\u2013May 2026", title: "Team lead: composite leading-edge bird strike", org: "GKN Aerospace / Cranfield University; four-person team" },
+    { year: "May\u2013Sept 2026", title: "MSc thesis: A320 slat-track can LPBF redesign", org: "GKN Aerospace / Cranfield University" },
+    { year: "Sept 2026", title: "MSc completed, weighted average 78.83 %; bird-strike work published in JMMP", org: "Cranfield University" },
   ],
 };
 
 // Tools matrix. `level`: Advanced | Working | Familiar. `used` entries are project ids ({id,label}) or plain strings.
 const TOOLS = [
   { name: "Abaqus/Standard and /Explicit", level: "Advanced", note: "Static, modal and fatigue-input runs on the slat-track can; SPH\u2013FEA soft-body impact for the leading-edge study; contact, tie constraints and nonlinear materials.", used: [{ id: "slat-track", label: "Slat-track can" }, { id: "bird-strike", label: "Bird strike" }, { id: "gearbox", label: "Gearbox" }] },
-  { name: "CATIA V5", level: "Advanced", note: "Native solid reconstruction of the released can geometry, multi-section surfaces and STEP exchange; concept-to-prototype gearbox modelling.", used: [{ id: "slat-track", label: "Slat-track can" }, { id: "gearbox", label: "Gearbox" }] },
+  { name: "CATIA V5", level: "Advanced", note: "Native solid reconstruction, multi-section surfaces and STEP exchange; concept-to-prototype gearbox modelling; FRP tank design and laminate selection, including the Composite Design workbench.", used: [{ id: "slat-track", label: "Slat-track can" }, { id: "gearbox", label: "Gearbox" }, "FRP tanks"] },
   { name: "3DEXPERIENCE", level: "Working", note: "Platform modelling and design documentation during the Dassault Syst\u00e8mes placement; EduSpace training on the composites and structural apps.", used: [{ id: "gearbox", label: "Gearbox" }, "EduSpace courses"] },
   { name: "Tosca Structure", level: "Working", note: "Bead and shape guidance for where the can wall should carry material; the load-path result seeded the variable-wall method.", used: [{ id: "slat-track", label: "Slat-track can" }] },
   { name: "nCode DesignLife", level: "Working", note: "EN 1999-1-3 weld-fatigue screening of the existing welded can, cross-checked by an independent shell tangent-stress route.", used: [{ id: "slat-track", label: "Slat-track can" }] },
   { name: "ANSYS Additive", level: "Working", note: "LPBF thermal simulation locating the sustained hotspot at the root and collar band, with a control run on the existing welded geometry.", used: [{ id: "slat-track", label: "Slat-track can" }] },
-  { name: "Python", level: "Working", note: "Post-processing of Abaqus field and history output, mesh handling and figure generation; nature-inspired optimisation and ML for the lattice paper.", used: [{ id: "slat-track", label: "Slat-track can" }, { id: "bird-strike", label: "Bird strike" }, { id: "lattice", label: "Lattice" }] },
+  { name: "Python", level: "Working", note: "Post-processing of Abaqus field and history output, mesh handling and figure generation; particle swarm optimisation of Random Forest and XGBoost models for the lattice paper.", used: [{ id: "slat-track", label: "Slat-track can" }, { id: "bird-strike", label: "Bird strike" }, { id: "lattice", label: "Lattice" }] },
   { name: "Materialise Magics", level: "Familiar", note: "Support strategy and build-orientation review for the LPBF candidate.", used: [{ id: "slat-track", label: "Slat-track can" }] },
   { name: "MATLAB and Excel", level: "Familiar", note: "Hand-calculation checks, data reduction and verification matrices.", used: ["Coursework", "Project checks"] },
 ];
 
 // Awards and recognitions. `image` opens in the lightbox.
 const AWARDS = [
-  { title: "ConnectNext Industry Internship Programme 2022\u201323", org: "La Fondation Dassault Syst\u00e8mes", year: "2024", image: "assets/gearbox/03_certificate.jpg", note: "Certificate awarded on completing the 18-month engineering design placement in Pune." },
+  { title: "ConnectNext Industry Internship Programme 2022\u201323", org: "La Fondation Dassault Syst\u00e8mes", year: "2024", image: "assets/gearbox/03_certificate.jpg", note: "Certificate for the engineering design placement in Pune, December 2022 to December 2023." },
   { title: "Royal Aeronautical Society, Student Affiliate", org: "RAeS", year: "Nov 2025", note: "The MSc is accredited by RAeS and IMechE for further learning toward CEng registration." },
 ];
 

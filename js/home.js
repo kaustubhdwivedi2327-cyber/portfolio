@@ -1,7 +1,7 @@
 /* Homepage markup. Text is verbatim from home-data.js (D); project media paths come from the site's js/data.js (PROJECTS). */
 const PJ = id => PROJECTS.find(p => p.id === id);
 const PH = f => `assets/photos/${f}.jpg`;
-const NAV = [["about-me", "About"], ["projects", "Projects"], ["skills", "Skills"], ["presentations", "Talks"], ["education", "Education"], ["contact", "Contact"]];
+const NAV = [["about-me", "About"], ["experience", "Experience"], ["projects", "Projects"], ["skills", "Skills"], ["presentations", "Talks"], ["education", "Education"], ["contact", "Contact"]];
 const PREVIEW = { "slat-track": { video: "assets/slat-track/video/lpbf_temp_alsi.mp4" }, "bird-strike": { video: "assets/bird-strike/video/le_iso_gfrp.mp4", light: true },
   gearbox: { frames: ["assets/gearbox/01_exploded.jpg", "assets/gearbox/02_section.jpg", "assets/gearbox/05_prototype_pictures.jpg"] },
   lattice: { frames: ["assets/lattice/fig05.jpg", "assets/lattice/fig06.jpg", "assets/lattice/fig07.jpg", "assets/lattice/fig08.jpg", "assets/lattice/fig09.jpg", "assets/lattice/fig10.jpg", "assets/lattice/fig11.jpg", "assets/lattice/fig12.jpg"] } };
@@ -122,6 +122,18 @@ function homeHTML(d) {
     </div>
   </div>
 </section>
+
+<section class="sec" id="experience"><div class="wrap">
+  ${head(d.experienceIntro.kicker, d.experienceIntro.title, d.experienceIntro.body)}
+  <div class="tools experience-grid">${d.experience.map(e => `
+    <article class="tool" data-reveal>
+      <p class="kicker">${esc(e.dates)}</p>
+      <div class="tool-h"><h3>${esc(e.role)}</h3></div>
+      <p><strong>${esc(e.org)}</strong></p>
+      ${e.bullets.map(b => `<p>${esc(b)}</p>`).join("")}
+    </article>`).join("")}
+  </div>
+</div></section>
 
 <section class="sec alt" id="projects">
   <div class="wrap">
@@ -245,7 +257,7 @@ function homeHTML(d) {
     <p class="kicker">${esc(d.contact.kicker)}</p>
     <h2 class="contact-h" data-reveal>${esc(d.contact.title)}</h2>
     <div class="mail" data-cite data-reveal><span data-cite-text>${esc(d.links.email)}</span><button type="button" class="btn btn-sm btn-glass" data-copy>Copy</button></div>
-    <p class="contact-open" data-reveal>${esc(d.open)}</p>
+    <p class="contact-open" data-reveal>${esc(d.open)}<br>${esc(d.place)} · <a href="${esc(d.links.phoneHref)}">${esc(d.links.phone)}</a></p>
     <div class="actions" data-reveal>${ext(d.links.linkedin, "LinkedIn \u2197", "btn btn-glass")}${ext(d.links.researchgate, "ResearchGate \u2197", "btn btn-glass")}${ext(d.links.cv, "Download CV (PDF)", "btn btn-accent")}</div>
   </div>
 </section>
